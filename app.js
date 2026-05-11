@@ -28,242 +28,193 @@ const els = {
     // Camera screen extras
     counterNum: $('#counter-num'),
     exportSection: $('#export-section'),
-    // Debug
-    debugLog: $('#debug-log'),
     btnExport: $('#btn-export'),
     btnClear: $('#btn-clear'),
     // Form fields
-    fSalutation: $('#field-salutation'),
-    fName: $('#field-name'),
-    fTitle: $('#field-title'),
-    fCompany: $('#field-company'),
-    fEmail: $('#field-email'),
-    fPhone: $('#field-phone'),
-    fNotes: $('#field-notes'),
+    fSalutation: $('#f-salutation'),
+    fName: $('#f-name'),
+    fTitle: $('#f-title'),
+    fCompany: $('#f-company'),
+    fEmail: $('#f-email'),
+    fPhone: $('#f-phone'),
+    fNotes: $('#f-notes'),
     emailConf: $('#email-confidence'),
+    contactForm: $('#contact-form'),
 };
 
 let stream = null;
-let capturedBlob = null;
+let currentImage = null;
 
-// ── Screen management ───────────────────────────
+// ── Screen navigation ────────────────────────────
 function showScreen(name) {
-    Object.values(screens).forEach(s => s.classList.remove('active'));
+    Object.values(screens).forEach((s) => s.classList.remove('active'));
     screens[name].classList.add('active');
 }
 
-// ── Toast ────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────
 function toast(msg, isError = false) {
-    const t = document.createElement('div');
-    t.className = 'toast' + (isError ? ' error' : '');
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2600);
+    const el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error' : '');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2600);
 }
 
-// ── API Key ──────────────────────────────────────
+// ── API Key management ───────────────────────────
 function getApiKey() {
-    return localStorage.getItem('badgescan_apikey') || '';
+    return localStorage.getItem('badgescan_openai_key') || '';
 }
 
-function requireApiKey() {
-    const key = getApiKey();
-    if (!key) {
-        els.apiKeyModal.classList.add('active');
-        els.apiKeyInput.focus();
-        return false;
-    }
-    return true;
+function setApiKey(key) {
+    localStorage.setItem('badgescan_openai_key', key.trim());
 }
 
-els.btnSaveKey.addEventListener('click', () => {
-    const key = els.apiKeyInput.value.trim();
-    if (!key.startsWith('sk-')) {
-        toast('Key must start with sk-', true);
-        return;
-    }
-    localStorage.setItem('badgescan_apikey', key);
-    els.apiKeyModal.classList.remove('active');
-    toast('API key saved!');
-    startCamera();
-});
-
-els.apiKeyInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') els.btnSaveKey.click();
-});
-
-// If modal is showing and user taps outside, don't hide —
-// they MUST set a key or nothing works. Close button? Not needed.
-
-// ── Camera ───────────────────────────────────────
-async function startCamera() {
-    if (!getApiKey()) {
-        els.apiKeyModal.classList.add('active');
-        return;
-    }
-
-    stopCamera();
-
-    const constraints = {
-        video: {
-            facingMode: 'environment',  // back camera
-            width: { ideal: 1920 },
-            height: { ideal: 1920 },
-        },
-        audio: false,
-    };
-
+// ── Contacts storage ─────────────────────────────
+function getContacts() {
     try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        return JSON.parse(localStorage.getItem('badgescan_contacts') || '[]');
+    } catch {
+        return [];
+    }
+}
+
+function saveContacts(contacts) {
+    localStorage.setItem('badgescan_contacts', JSON.stringify(contacts));
+    updateCounter();
+}
+
+function addContact(contact) {
+    const contacts = getContacts();
+    contacts.unshift(contact);
+    saveContacts(contacts);
+}
+
+function updateCounter() {
+    const count = getContacts().length;
+    if (els.counterNum) els.counterNum.textContent = count;
+    if (els.exportSection) {
+        els.exportSection.classList.toggle('hidden', count === 0);
+    }
+}
+
+// ── CSV Export ────────────────────────────────────
+function exportCSV() {
+    const contacts = getContacts();
+    if (!contacts.length) return toast('No contacts to export', true);
+
+    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Notes', 'Captured'];
+    const rows = contacts.map((c) =>
+        [
+            c.name, c.salutation, c.title, c.company,
+            c.email, c.phone, c.notes, c.captured_at,
+        ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
+    );
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `badgescan-contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${contacts.length} contacts`);
+}
+
+function clearAllContacts() {
+    if (!confirm('Delete all scanned contacts? This cannot be undone.')) return;
+    saveContacts([]);
+    toast('All contacts cleared');
+}
+
+// ── Camera ────────────────────────────────────────
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+            audio: false,
+        });
         els.preview.srcObject = stream;
-        await els.preview.play();
         els.btnCapture.disabled = false;
-        els.statusText.textContent = 'Camera ready — position badge in frame';
+        els.statusText.textContent = '';
     } catch (err) {
         console.error('Camera error:', err);
         if (err.name === 'NotAllowedError') {
-            els.statusText.textContent = 'Camera permission denied. Please allow camera access and reload.';
+            els.statusText.textContent = 'Camera access denied. Please allow camera in settings.';
         } else if (err.name === 'NotFoundError') {
-            els.statusText.textContent = 'No camera found. Use gallery option below.';
-            els.btnFile.style.display = 'flex';
+            els.statusText.textContent = 'No camera found. Use Upload Photo instead.';
         } else {
-            els.statusText.textContent = 'Camera unavailable on this device. Try gallery.';
+            els.statusText.textContent = 'Camera error: ' + err.message;
         }
-        els.btnCapture.disabled = true;
     }
 }
 
 function stopCamera() {
     if (stream) {
-        stream.getTracks().forEach(t => t.stop());
+        stream.getTracks().forEach((t) => t.stop());
         stream = null;
     }
+    els.preview.srcObject = null;
 }
 
-// ── Capture from camera ──────────────────────────
-els.btnCapture.addEventListener('click', () => {
-    if (!els.preview.srcObject) return;
-
+function captureFrame() {
     const video = els.preview;
     const canvas = els.canvas;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
-
-    canvas.toBlob((blob) => {
-        capturedBlob = blob;
-        processBadge(blob);
-    }, 'image/jpeg', 0.9);
-});
-
-// ── File / Gallery pick ──────────────────────────
-els.btnFile.addEventListener('click', () => els.inputFile.click());
-
-els.inputFile.addEventListener('change', () => {
-    const file = els.inputFile.files[0];
-    if (!file) return;
-    capturedBlob = file;
-    processBadge(file);
-    els.inputFile.value = '';  // allow re-pick of same file
-});
-
-// ── Rescan ────────────────────────────────────────
-els.btnRescan.addEventListener('click', () => {
-    capturedBlob = null;
-    showScreen('camera');
-    startCamera();
-});
-
-// ── Processing ────────────────────────────────────
-async function processBadge(imageBlob) {
-    if (!requireApiKey()) return;
-
-    showScreen('processing');
-    resetSteps();
-
-    try {
-        // Step 1: OCR / parse badge with Vision
-        setStep(0, 'in_progress');
-        const parsedData = await parseBadgeImage(imageBlob);
-        setStep(0, 'done');
-
-        // Step 2: Verify we got useful data
-        if (!parsedData.name || parsedData.name.trim() === '') {
-            setStep(0, 'done');
-            throw new Error('Could not read a name from the badge. Try a clearer photo.');
-        }
-        setStep(1, 'done');
-
-        // Step 3: Email lookup (if we have name + company)
-        if (parsedData.name && parsedData.company) {
-            setStep(2, 'in_progress');
-            const emailResult = await lookupEmail(parsedData.name, parsedData.company);
-            if (emailResult && emailResult.email) {
-                parsedData.email = emailResult.email;
-                parsedData.email_confidence = emailResult.confidence;
-                parsedData.email_reasoning = emailResult.reasoning;
-            }
-            setStep(2, 'done');
-        } else {
-            setStep(2, 'done');
-        }
-
-        // Show result
-        showResult(parsedData, imageBlob);
-
-    } catch (err) {
-        console.error('Processing error:', err);
-        toast(err.message || 'Processing failed. Please try again.', true);
-        showScreen('camera');
-        startCamera();
-    }
+    return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-function resetSteps() {
-    els.steps.forEach(s => {
-        s.classList.add('pending');
-        s.classList.remove('done', 'in_progress');
+// ── Helpers ───────────────────────────────────────
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            // Strip the prefix (data:image/jpeg;base64,)
+            const comma = dataUrl.indexOf(',');
+            resolve(dataUrl.slice(comma + 1));
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
     });
 }
 
-function setStep(index, state) {
-    const step = els.steps[index];
-    if (!step) return;
-    step.classList.remove('pending', 'done', 'in_progress');
-    if (state === 'done') {
-        step.classList.add('done');
-    } else if (state === 'in_progress') {
-        step.classList.add('in_progress');
-    } else {
-        step.classList.add('pending');
-    }
+function dataURLtoBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const bytes = atob(parts[1]);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return new Blob([arr], { type: mime });
 }
 
-// ── Extract text from Responses API output ────────
-function getResponseText(data) {
-    // Dump raw response to visible debug panel
-    if (els.debugLog) {
-        els.debugLog.style.display = 'block';
-        els.debugLog.textContent = JSON.stringify(data, null, 2);
+function setStep(index, status) {
+    const el = els.steps[index];
+    if (!el) return;
+    el.classList.remove('pending', 'done');
+    if (status === 'in_progress') {
+        el.classList.add('pending');
+        el.textContent = el.textContent.replace('✅', '').replace('📸', '📷').trim();
+    } else if (status === 'done') {
+        el.classList.add('done');
+        // Replace icon with checkmark
+        const icons = ['📷', '🔍', '📧'];
+        const doneIcons = ['✅', '✅', '✅'];
+        const text = el.textContent.replace(icons[index], doneIcons[index]);
+        el.textContent = text;
     }
-
-    // Try to find any message with text content
-    for (const item of (data.output || [])) {
-        if (!item.content || !item.content.length) continue;
-        for (const block of item.content) {
-            if (block.text) return block.text;
-            if (block.value) return block.value;
-        }
-    }
-
-    throw new Error('No text found in response output');
 }
 
 // ── Extract JSON string from AI response ──────────
 function extractJSON(text) {
-    // Strip markdown fences
-    let s = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    let s = text
+        .replace(/```json\s*/gi, '')
+        .replace(/```\s*/g, '')
+        .trim();
 
     // Find JSON object boundaries
     const start = s.indexOf('{');
@@ -272,20 +223,63 @@ function extractJSON(text) {
         s = s.slice(start, end + 1);
     }
 
-    // Try direct parse
-    try { return JSON.parse(s); } catch (_) {}
+    // Replace literal newlines in string values with \n
+    // Pattern: inside double-quoted strings, turn real newlines into \n
+    let fixed = '';
+    let inString = false;
+    let escapeNext = false;
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (escapeNext) {
+            fixed += ch;
+            escapeNext = false;
+            continue;
+        }
+        if (ch === '\\') {
+            fixed += ch;
+            escapeNext = true;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            fixed += ch;
+            continue;
+        }
+        if (inString && ch === '\n') {
+            fixed += '\\n';
+            continue;
+        }
+        if (inString && ch === '\r') {
+            fixed += '\\r';
+            continue;
+        }
+        if (inString && ch === '\t') {
+            fixed += '\\t';
+            continue;
+        }
+        fixed += ch;
+    }
 
-    // Fallback: the AI likely put literal newlines in a multiline value (raw_text).
-    // Strategy: use Function constructor — it tolerates unescaped newlines in strings
-    // better than JSON.parse, and we control the input (no code injection risk from
-    // a known-safe AI response shape).
     try {
-        // Wrap in parens so `{...}` is parsed as an object literal, not a block
-        return (new Function('return (' + s + ')'))();
-    } catch (_) {}
+        return JSON.parse(fixed);
+    } catch (e) {
+        console.error('JSON parse failed. Original:', s.slice(0, 200));
+        console.error('Fixed:', fixed.slice(0, 200));
+        return null;
+    }
+}
 
-    // Last resort: return null so caller can handle gracefully
-    return null;
+// ── Extract text from Responses API output ────────
+function getResponseText(data) {
+    // Try to find any message with text content
+    for (const item of (data.output || [])) {
+        if (!item.content || !item.content.length) continue;
+        for (const block of item.content) {
+            if (block.text) return block.text;
+            if (block.value) return block.value;
+        }
+    }
+    throw new Error('No text found in response output');
 }
 
 // ── OpenAI: Parse badge image ────────────────────
@@ -305,7 +299,8 @@ Fields to extract (use null if not visible on the badge):
   "company": "Company or organization name",
   "phone": "Phone number if visible",
   "website": "Website URL if visible",
-  "location": "City/address if visible"
+  "location": "City/address if visible",
+  "raw_text": "All text visible on the badge in full"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -343,10 +338,7 @@ Fields to extract (use null if not visible on the badge):
 
     const data = await response.json();
     const content = getResponseText(data);
-
-    // Strip markdown fences, parse JSON
-    const jsonStr = content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(jsonStr);
+    return extractJSON(content);
 }
 
 // ── OpenAI: Email lookup ──────────────────────────
@@ -361,16 +353,14 @@ Use common email patterns:
 - firstinitiallastname@company.com
 - etc.
 
-Also provide a confidence level (high/medium/low) and ONE-SENTENCE reasoning with NO line breaks.
+Also provide a confidence level (high/medium/low) and brief reasoning.
 
-Return valid, parseable JSON on a single logical line (no literal newlines inside values):
+Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
   "email": "guessed@email.com",
   "confidence": "high|medium|low",
-  "reasoning": "One sentence with no line breaks"
-}
-
-IMPORTANT: Your response must be valid JSON. Do NOT include literal newlines inside string values. Escape any double quotes with backslash.`;
+  "reasoning": "One sentence explaining the guess"
+}`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
@@ -418,7 +408,9 @@ function showResult(parsed, imageBlob) {
     els.fCompany.value = parsed.company || '';
     els.fEmail.value = parsed.email || '';
     els.fPhone.value = parsed.phone || '';
-    els.fNotes.value = '';
+    els.fNotes.value = parsed.location
+        ? `Met at conference. Location from badge: ${parsed.location}`
+        : 'Met at conference.';
 
     // Email confidence indicator
     if (parsed.email_confidence) {
@@ -434,21 +426,87 @@ function showResult(parsed, imageBlob) {
     }
 
     showScreen('result');
+}
 
-    // Focus the email field so user can verify immediately
-    setTimeout(() => els.fEmail.focus(), 300);
-    if (parsed.email) {
-        setTimeout(() => els.fEmail.select(), 350);
+// ── Process image ─────────────────────────────────
+async function processImage(imageBlob) {
+    showScreen('processing');
+
+    // Reset step states
+    els.steps.forEach((s) => {
+        s.classList.add('pending');
+        s.classList.remove('done');
+    });
+    els.steps[0].textContent = '📷 Reading badge...';
+    els.steps[1].textContent = '🔍 Finding contact details...';
+    els.steps[2].textContent = '📧 Looking up email address...';
+
+    try {
+        // Step 1: OCR / parse badge with Vision
+        setStep(0, 'in_progress');
+        const parsedData = await parseBadgeImage(imageBlob);
+        setStep(0, 'done');
+
+        // Step 2: Verify we got useful data
+        if (!parsedData || !parsedData.name || parsedData.name.trim() === '') {
+            setStep(0, 'done');
+            throw new Error('Could not read a name from the badge. Try a clearer photo.');
+        }
+        setStep(1, 'done');
+
+        // Step 3: Email lookup (if we have name + company)
+        if (parsedData.name && parsedData.company) {
+            setStep(2, 'in_progress');
+            const emailResult = await lookupEmail(parsedData.name, parsedData.company);
+            parsedData.email = emailResult.email;
+            parsedData.email_confidence = emailResult.confidence;
+            parsedData.email_reasoning = emailResult.reasoning;
+            setStep(2, 'done');
+        } else {
+            setStep(2, 'done');
+        }
+
+        // Show result
+        showResult(parsedData, imageBlob);
+
+    } catch (err) {
+        console.error('Processing error:', err);
+        toast(err.message || 'Something went wrong. Please try again.', true);
+        showScreen('camera');
     }
 }
 
-// ── Save contact ──────────────────────────────────
-$('#contact-form').addEventListener('submit', (e) => {
+// ── Event: Capture button ─────────────────────────
+els.btnCapture.addEventListener('click', () => {
+    const dataUrl = captureFrame();
+    currentImage = dataURLtoBlob(dataUrl);
+    processImage(currentImage);
+});
+
+// ── Event: File upload ────────────────────────────
+els.btnFile.addEventListener('click', () => els.inputFile.click());
+
+els.inputFile.addEventListener('change', () => {
+    const file = els.inputFile.files[0];
+    if (!file) return;
+    currentImage = file;
+    processImage(file);
+    els.inputFile.value = '';
+});
+
+// ── Event: Rescan ─────────────────────────────────
+els.btnRescan.addEventListener('click', () => {
+    showScreen('camera');
+    startCamera();
+});
+
+// ── Event: Save contact ───────────────────────────
+els.contactForm.addEventListener('submit', (e) => {
     e.preventDefault();
 
     const contact = {
-        salutation: els.fSalutation.value.trim(),
         name: els.fName.value.trim(),
+        salutation: els.fSalutation.value.trim(),
         title: els.fTitle.value.trim(),
         company: els.fCompany.value.trim(),
         email: els.fEmail.value.trim(),
@@ -459,140 +517,59 @@ $('#contact-form').addEventListener('submit', (e) => {
 
     if (!contact.name) {
         toast('Name is required', true);
-        els.fName.focus();
-        return;
-    }
-    if (!contact.email) {
-        toast('Email is required', true);
-        els.fEmail.focus();
         return;
     }
 
-    // Accumulate to localStorage
-    const contacts = getContacts();
-    contacts.push(contact);
-    saveContacts(contacts);
-
-    toast('Contact saved! Ready for next badge.');
+    addContact(contact);
+    toast(`Saved: ${contact.name}`);
 
     // Reset and go back to camera
-    capturedBlob = null;
-    setTimeout(() => {
-        showScreen('camera');
-        startCamera();
-    }, 1200);
+    els.contactForm.reset();
+    showScreen('camera');
+    startCamera();
 });
 
-// ── Contacts storage ──────────────────────────────
-function getContacts() {
-    try {
-        return JSON.parse(localStorage.getItem('badgescan_contacts') || '[]');
-    } catch {
-        return [];
-    }
-}
+// ── Event: Export ─────────────────────────────────
+els.btnExport.addEventListener('click', exportCSV);
 
-function saveContacts(contacts) {
-    localStorage.setItem('badgescan_contacts', JSON.stringify(contacts));
-    updateCounter();
-}
+// ── Event: Clear ──────────────────────────────────
+els.btnClear.addEventListener('click', clearAllContacts);
 
-function updateCounter() {
-    const count = getContacts().length;
-    els.counterNum.textContent = count;
-    els.exportSection.classList.toggle('hidden', count === 0);
-}
-
-// ── Export All CSV ─────────────────────────────────
-els.btnExport.addEventListener('click', () => {
-    const contacts = getContacts();
-    if (contacts.length === 0) {
-        toast('No contacts to export', true);
-        return;
-    }
-
-    const headers = ['Salutation', 'Name', 'Title', 'Company', 'Email', 'Phone', 'Notes', 'Captured At'];
-    const rows = contacts.map(c => [
-        c.salutation, c.name, c.title, c.company,
-        c.email, c.phone, c.notes, c.captured_at,
-    ]);
-
-    const csvContent =
-        headers.join(',') + '\n' +
-        rows.map(row => row.map(v => `"${(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const now = new Date();
-    a.download = `badgescan_export_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast(`Exported ${contacts.length} contacts`);
+// ── API Key modal ─────────────────────────────────
+$('#btn-apikey').addEventListener('click', () => {
+    els.apiKeyInput.value = getApiKey();
+    els.apiKeyModal.classList.add('active');
 });
 
-// ── Clear All ──────────────────────────────────────
-els.btnClear.addEventListener('click', () => {
-    const count = getContacts().length;
-    if (count === 0) return;
-
-    if (!confirm(`Delete all ${count} scanned contacts? This cannot be undone. Export first if you want to save them.`)) {
-        return;
-    }
-
-    localStorage.removeItem('badgescan_contacts');
-    updateCounter();
-    toast('All contacts cleared');
+$('.modal-bg').addEventListener('click', () => {
+    els.apiKeyModal.classList.remove('active');
 });
 
-// ── Helpers ───────────────────────────────────────
-function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            // reader.result is "data:image/jpeg;base64,xxxxx"
-            const base64 = reader.result.split(',')[1];
-            resolve(base64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
-}
-
-// ── PWA Install Prompt ────────────────────────────
-let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    // Could show an "Install App" button, but for simplicity we rely on
-    // the browser's built-in install affordance (address bar or menu).
-    // The manifest + service worker handle installability.
+els.btnSaveKey.addEventListener('click', () => {
+    const key = els.apiKeyInput.value.trim();
+    if (!key) return toast('Please enter an API key', true);
+    setApiKey(key);
+    els.apiKeyModal.classList.remove('active');
+    toast('API key saved');
 });
 
 // ── Init ──────────────────────────────────────────
 function init() {
     // Register service worker
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {
-            // SW fails silently — app still works without offline caching
-        });
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
 
-    // Initialize counter from stored contacts
-    updateCounter();
-
-    // If API key exists, start camera immediately
-    if (getApiKey()) {
-        startCamera();
-    } else {
+    // Check for API key
+    if (!getApiKey()) {
         els.apiKeyModal.classList.add('active');
     }
 
-    // On iOS, camera needs user gesture. startCamera() from init
-    // will fail silently on iOS if no gesture. We show the modal first
-    // which requires a tap (Save Key) — that counts as the gesture.
+    // Update contact counter
+    updateCounter();
+
+    // Start camera
+    startCamera();
 }
 
 init();
