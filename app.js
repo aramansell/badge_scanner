@@ -303,11 +303,16 @@ Fields to extract (use null if not visible on the badge):
 async function lookupEmail(name, company) {
     const systemPrompt = `You are an email lookup assistant for a conference contact app.
 Given a person's name and company, provide your BEST GUESS for their work email address.
+Search for their email address on the web given their name and their company. If you can't find their information give your best guess given the common email patterns below.
+
 Use common email patterns:
 - firstname@company.com
 - firstname.lastname@company.com
 - firstinitiallastname@company.com
 - etc.
+
+
+
 
 Also provide a confidence level (high/medium/low) and brief reasoning.
 
