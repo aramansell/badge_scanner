@@ -268,11 +268,17 @@ Fields to extract (use null if not visible on the badge):
             instructions: instructions,
             input: [
                 {
-                    type: 'input_image',
-                    image_url: `data:image/jpeg;base64,${base64}`,
-                    detail: 'high',
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'input_image',
+                            image_url: `data:image/jpeg;base64,${base64}`,
+                            detail: 'high',
+                        },
+                        { type: 'input_text', text: 'Extract contact details from this badge.' },
+                    ],
                 },
-                { type: 'input_text', text: 'Extract contact details from this badge.' },
             ],
             max_output_tokens: 800,
             temperature: 0,
