@@ -427,7 +427,6 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
             ],
             tools: [{ type: 'web_search' }],
             max_output_tokens: 600,
-            temperature: 0.3,
         }),
     });
 
