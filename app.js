@@ -199,9 +199,11 @@ async function processBadge(imageBlob) {
         if (parsedData.name && parsedData.company) {
             setStep(2, 'in_progress');
             const emailResult = await lookupEmail(parsedData.name, parsedData.company);
-            parsedData.email = emailResult.email;
-            parsedData.email_confidence = emailResult.confidence;
-            parsedData.email_reasoning = emailResult.reasoning;
+            if (emailResult && emailResult.email) {
+                parsedData.email = emailResult.email;
+                parsedData.email_confidence = emailResult.confidence;
+                parsedData.email_reasoning = emailResult.reasoning;
+            }
             setStep(2, 'done');
         } else {
             setStep(2, 'done');
@@ -359,14 +361,16 @@ Use common email patterns:
 - firstinitiallastname@company.com
 - etc.
 
-Also provide a confidence level (high/medium/low) and brief reasoning.
+Also provide a confidence level (high/medium/low) and ONE-SENTENCE reasoning with NO line breaks.
 
-Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
+Return valid, parseable JSON on a single logical line (no literal newlines inside values):
 {
   "email": "guessed@email.com",
   "confidence": "high|medium|low",
-  "reasoning": "One sentence explaining the guess"
-}`;
+  "reasoning": "One sentence with no line breaks"
+}
+
+IMPORTANT: Your response must be valid JSON. Do NOT include literal newlines inside string values. Escape any double quotes with backslash.`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
