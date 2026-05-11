@@ -238,19 +238,26 @@ function setStep(index, state) {
 
 // ── Extract text from Responses API output ────────
 function getResponseText(data) {
-    const msg = data.output.find(
-        item => item.type === 'message' && item.role === 'assistant'
-    );
-    if (!msg || !msg.content || !msg.content.length) {
-        throw new Error('No assistant message in response');
+    // Log full output structure for debugging
+    console.log('Response output items:', JSON.stringify(data.output.map(item => ({
+        type: item.type,
+        role: item.role,
+        status: item.status,
+        contentTypes: item.content ? item.content.map(c => c.type) : null,
+    }))));
+
+    // Try to find any message with text content
+    for (const item of (data.output || [])) {
+        if (!item.content || !item.content.length) continue;
+        for (const block of item.content) {
+            if (block.text) return block.text;
+            if (block.value) return block.value;
+        }
     }
-    // Try known text-bearing content types
-    for (const block of msg.content) {
-        if (block.text) return block.text;
-        if (block.value) return block.value;
-    }
-    // Last resort: stringify the whole thing
-    return JSON.stringify(msg.content);
+
+    // If nothing found, log full output and throw
+    console.error('Full output:', JSON.stringify(data.output));
+    throw new Error('No text found in response output');
 }
 
 // ── OpenAI: Parse badge image ────────────────────
