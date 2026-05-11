@@ -271,14 +271,41 @@ function extractJSON(text) {
 
 // ── Extract text from Responses API output ────────
 function getResponseText(data) {
-    // Try to find any message with text content
-    for (const item of (data.output || [])) {
-        if (!item.content || !item.content.length) continue;
-        for (const block of item.content) {
-            if (block.text) return block.text;
-            if (block.value) return block.value;
-        }
+    console.log('RAW RESPONSE:', JSON.stringify(data).slice(0, 1000));
+
+    // Path 1: data.output_text (flat text response, like Chat Completions)
+    if (data.output_text && typeof data.output_text === 'string') {
+        return data.output_text;
     }
+
+    // Path 2: data.output[] -> item.content[] -> block.text
+    for (const item of (data.output || [])) {
+        if (item.type === 'message' && item.content && item.content.length) {
+            for (const block of item.content) {
+                if (block.text) return block.text;
+                if (block.value) return block.value;
+            }
+        }
+        // Direct text on item
+        if (item.text) return item.text;
+    }
+
+    // Path 3: data.choices[0].message.content (Chat Completions fallback)
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+        return data.choices[0].message.content || '';
+    }
+
+    // Path 4: Deep scan — any string property that looks like the output
+    const jsonStr = JSON.stringify(data);
+    // Look for a text block anywhere in the tree
+    const textMatch = jsonStr.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (textMatch) {
+        try {
+            return JSON.parse('"' + textMatch[1] + '"');
+        } catch { /* fall through */ }
+    }
+
+    console.error('Unable to extract text. Full response:', jsonStr.slice(0, 2000));
     throw new Error('No text found in response output');
 }
 
@@ -458,9 +485,11 @@ async function processImage(imageBlob) {
         if (parsedData.name && parsedData.company) {
             setStep(2, 'in_progress');
             const emailResult = await lookupEmail(parsedData.name, parsedData.company);
-            parsedData.email = emailResult.email;
-            parsedData.email_confidence = emailResult.confidence;
-            parsedData.email_reasoning = emailResult.reasoning;
+            if (emailResult) {
+                parsedData.email = emailResult.email;
+                parsedData.email_confidence = emailResult.confidence;
+                parsedData.email_reasoning = emailResult.reasoning;
+            }
             setStep(2, 'done');
         } else {
             setStep(2, 'done');
