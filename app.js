@@ -240,7 +240,7 @@ function setStep(index, state) {
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
 
-    const systemPrompt = `You are a badge scanner for a conference contact capture app.
+    const instructions = `You are a badge scanner for a conference contact capture app.
 Analyze this image of a conference badge or business card.
 Extract every piece of information you can see. Do not make up information.
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object.
@@ -257,31 +257,24 @@ Fields to extract (use null if not visible on the badge):
   "raw_text": "All text visible on the badge in full"
 }`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-5.4',
-            messages: [
-                { role: 'system', content: systemPrompt },
+            model: 'gpt-5.5',
+            instructions: instructions,
+            input: [
                 {
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:image/jpeg;base64,${base64}`,
-                                detail: 'high',
-                            },
-                        },
-                        { type: 'text', text: 'Extract contact details from this badge.' },
-                    ],
+                    type: 'input_image',
+                    image_url: `data:image/jpeg;base64,${base64}`,
+                    detail: 'high',
                 },
+                { type: 'input_text', text: 'Extract contact details from this badge.' },
             ],
-            max_tokens: 800,
+            max_output_tokens: 800,
             temperature: 0,
         }),
     });
@@ -292,7 +285,7 @@ Fields to extract (use null if not visible on the badge):
     }
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
+    const content = data.output_text;
 
     // Parse JSON from response (strip any markdown fences)
     const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -301,7 +294,7 @@ Fields to extract (use null if not visible on the badge):
 
 // ── OpenAI: Email lookup ──────────────────────────
 async function lookupEmail(name, company) {
-    const systemPrompt = `You are an email lookup assistant for a conference contact app.
+    const instructions = `You are an email lookup assistant for a conference contact app.
 Given a person's name and company, provide your BEST GUESS for their work email address.
 Search for their email address on the web given their name and their company. If you can't find their information give your best guess given the common email patterns below.
 
@@ -310,9 +303,6 @@ Use common email patterns:
 - firstname.lastname@company.com
 - firstinitiallastname@company.com
 - etc.
-
-
-
 
 Also provide a confidence level (high/medium/low) and brief reasoning.
 
@@ -323,65 +313,28 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
   "reasoning": "One sentence explaining the guess"
 }`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-5.4',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                {
-                    role: 'user',
-                    content: `Name: ${name}\nCompany: ${company}\n\nWhat is the most likely work email for this person?`,
-                },
-            ],
-            max_tokens: 200,
+            model: 'gpt-5.5',
+            instructions: instructions,
+            input: `Name: ${name}\nCompany: ${company}\n\nWhat is the most likely work email for this person?`,
+            max_output_tokens: 200,
             temperature: 0,
         }),
     });
 
     if (!response.ok) {
-        // If 4.5-preview not available, fall back to 4o
-        if (response.status === 404 || response.status === 400) {
-            return lookupEmailFallback(name, company);
-        }
         const err = await response.json().catch(() => ({}));
         throw new Error(err.error?.message || `Email lookup failed (${response.status})`);
     }
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
-    const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(jsonStr);
-}
-
-async function lookupEmailFallback(name, company) {
-    // Fallback to gpt-4o for email lookup
-    const systemPrompt = `You are an email lookup assistant. Given a person's name and company, provide your best guess for their work email. Use common patterns. Return ONLY valid JSON: {"email": "guess@company.com", "confidence": "high|medium|low", "reasoning": "one sentence"}`;
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getApiKey()}`,
-        },
-        body: JSON.stringify({
-            model: 'gpt-5.4',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: `Name: ${name}\nCompany: ${company}` }],
-            max_tokens: 200,
-            temperature: 0,
-        }),
-    });
-
-    if (!response.ok) {
-        return { email: '', confidence: 'low', reasoning: 'Could not look up email.' };
-    }
-
-    const data = await response.json();
-    const content = data.choices[0].message.content;
+    const content = data.output_text;
     const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     return JSON.parse(jsonStr);
 }

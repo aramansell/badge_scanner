@@ -12,9 +12,9 @@
 // 3. Allow camera access when prompted
 // 4. Start scanning!
 //
-// MODELS USED:
-// - Badge parsing (vision):  gpt-4o            (supports image input)
-// - Email lookup:             gpt-4.5-preview   (falls back to gpt-4o)
+// MODELS USED (Responses API):
+// - Both parsing and email lookup use: gpt-5.5
+// - Calls go to: https://api.openai.com/v1/responses
 //
 // The app is a static PWA — deploy to Netlify, Vercel, GitHub Pages,
 // or any static host. Must be served over HTTPS for camera access
