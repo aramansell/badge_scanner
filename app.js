@@ -28,6 +28,8 @@ const els = {
     // Camera screen extras
     counterNum: $('#counter-num'),
     exportSection: $('#export-section'),
+    // Debug
+    debugLog: $('#debug-log'),
     btnExport: $('#btn-export'),
     btnClear: $('#btn-clear'),
     // Form fields
@@ -238,13 +240,11 @@ function setStep(index, state) {
 
 // ── Extract text from Responses API output ────────
 function getResponseText(data) {
-    // Log full output structure for debugging
-    console.log('Response output items:', JSON.stringify(data.output.map(item => ({
-        type: item.type,
-        role: item.role,
-        status: item.status,
-        contentTypes: item.content ? item.content.map(c => c.type) : null,
-    }))));
+    // Dump raw response to visible debug panel
+    if (els.debugLog) {
+        els.debugLog.style.display = 'block';
+        els.debugLog.textContent = JSON.stringify(data, null, 2);
+    }
 
     // Try to find any message with text content
     for (const item of (data.output || [])) {
@@ -255,8 +255,6 @@ function getResponseText(data) {
         }
     }
 
-    // If nothing found, log full output and throw
-    console.error('Full output:', JSON.stringify(data.output));
     throw new Error('No text found in response output');
 }
 
