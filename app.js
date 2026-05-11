@@ -383,22 +383,28 @@ Fields to extract (use null if not visible on the badge):
 // ── OpenAI: Email lookup ──────────────────────────
 async function lookupEmail(name, company) {
     const instructions = `You are an email lookup assistant for a conference contact app.
-Given a person's name and company, provide your BEST GUESS for their work email address.
-Search for their email address on the web given their name and their company. If you can't find their information give your best guess given the common email patterns below.
+Given a person's name and company, find their work email address.
 
-Use common email patterns:
-- firstname@company.com
-- firstname.lastname@company.com
-- firstinitiallastname@company.com
-- etc.
+IMPORTANT: You MUST use the web_search tool to search for this person's email.
+Search queries to try (in order):
+1. "[name] [company] email" — find their actual email if publicly listed
+2. "[company] email format" — determine the company's email naming convention
+3. "[company] [name] linkedin" — find their LinkedIn for title/email hints
 
-Also provide a confidence level (high/medium/low) and brief reasoning.
+After searching, synthesize what you find into the best email guess.
+If you found an actual email, use it. If not, use the company's naming pattern.
+NEVER use placeholder values — always provide a real email guess.
+
+Common patterns to consider: first@company.com, first.last@company.com, 
+firstinitiallast@company.com, first_last@company.com.
+
+Also provide a confidence level and one-sentence reasoning about what you found.
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "email": "guessed@email.com",
+  "email": "actual_email_guess@company.com",
   "confidence": "high|medium|low",
-  "reasoning": "One sentence explaining the guess"
+  "reasoning": "One sentence explaining what you found from web search"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -415,12 +421,13 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
                     type: 'message',
                     role: 'user',
                     content: [
-                        { type: 'input_text', text: `Name: ${name}\nCompany: ${company}\n\nWhat is the most likely work email for this person?` },
+                        { type: 'input_text', text: `Name: ${name}\nCompany: ${company}\n\nSearch the web and find the most likely work email for this person.` },
                     ],
                 },
             ],
-            max_output_tokens: 200,
-
+            tools: [{ type: 'web_search' }],
+            max_output_tokens: 600,
+            temperature: 0.3,
         }),
     });
 
