@@ -236,6 +236,23 @@ function setStep(index, state) {
     }
 }
 
+// ── Extract text from Responses API output ────────
+function getResponseText(data) {
+    const msg = data.output.find(
+        item => item.type === 'message' && item.role === 'assistant'
+    );
+    if (!msg || !msg.content || !msg.content.length) {
+        throw new Error('No assistant message in response');
+    }
+    // Try known text-bearing content types
+    for (const block of msg.content) {
+        if (block.text) return block.text;
+        if (block.value) return block.value;
+    }
+    // Last resort: stringify the whole thing
+    return JSON.stringify(msg.content);
+}
+
 // ── OpenAI: Parse badge image ────────────────────
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
@@ -291,7 +308,7 @@ Fields to extract (use null if not visible on the badge):
     }
 
     const data = await response.json();
-    const content = data.output_text;
+    const content = getResponseText(data);
 
     // Parse JSON from response (strip any markdown fences)
     const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -340,7 +357,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
     }
 
     const data = await response.json();
-    const content = data.output_text;
+    const content = getResponseText(data);
     const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     return JSON.parse(jsonStr);
 }
