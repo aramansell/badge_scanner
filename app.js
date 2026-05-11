@@ -264,7 +264,7 @@ Fields to extract (use null if not visible on the badge):
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-5.5',
+            model: 'gpt-5.4',
             messages: [
                 { role: 'system', content: systemPrompt },
                 {
@@ -330,7 +330,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-4.5-preview',
+            model: 'gpt-5.4',
             messages: [
                 { role: 'system', content: systemPrompt },
                 {
@@ -369,7 +369,7 @@ async function lookupEmailFallback(name, company) {
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-4o',
+            model: 'gpt-5.4',
             messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: `Name: ${name}\nCompany: ${company}` }],
             max_tokens: 200,
             temperature: 0,
