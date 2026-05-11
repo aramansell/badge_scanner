@@ -258,6 +258,37 @@ function getResponseText(data) {
     throw new Error('No text found in response output');
 }
 
+// ── Extract JSON string from AI response ──────────
+function extractJSON(text) {
+    // Strip markdown fences
+    let s = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+    // Find first { and last } — the AI sometimes wraps in commentary
+    const start = s.indexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+        s = s.slice(start, end + 1);
+    }
+
+    // Try direct parse first
+    try {
+        return JSON.parse(s);
+    } catch (_) {}
+
+    // Retry: escape unescaped control characters in string values
+    // This handles raw_text fields with literal newlines that break JSON
+    s = s.replace(/"([^"\\]*?)"/g, (match, inner) => {
+        // Re-escape control characters inside the string value
+        const fixed = inner
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\t/g, '\\t');
+        return '"' + fixed + '"';
+    });
+
+    return JSON.parse(s);
+}
+
 // ── OpenAI: Parse badge image ────────────────────
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
@@ -317,6 +348,9 @@ Fields to extract (use null if not visible on the badge):
 
     // Extract JSON from response (robust — handles multiline raw_text, markdown fences, etc.)
     return extractJSON(content);
+}
+
+// ── OpenAI: Email lookup ──────────────────────────
 async function lookupEmail(name, company) {
     const instructions = `You are an email lookup assistant for a conference contact app.
 Given a person's name and company, provide your BEST GUESS for their work email address.
