@@ -270,42 +270,54 @@ function extractJSON(text) {
 }
 
 // ── Extract text from Responses API output ────────
+function debugOut(msg) {
+    const el = $('#debug-out');
+    if (!el) return;
+    el.style.display = 'block';
+    el.textContent += msg + '\n';
+}
+
 function getResponseText(data) {
-    console.log('RAW RESPONSE:', JSON.stringify(data).slice(0, 1000));
+    debugOut('=== RAW RESPONSE ===');
+    debugOut(JSON.stringify(data, null, 1).slice(0, 2000));
 
-    // Path 1: data.output_text (flat text response, like Chat Completions)
-    if (data.output_text && typeof data.output_text === 'string') {
-        return data.output_text;
-    }
+    // Recursively walk the JSON tree. Return the first string
+    // longer than 20 characters found in a "text", "value",
+    // "content", or "output_text" field.
+    const candidates = [];
 
-    // Path 2: data.output[] -> item.content[] -> block.text
-    for (const item of (data.output || [])) {
-        if (item.type === 'message' && item.content && item.content.length) {
-            for (const block of item.content) {
-                if (block.text) return block.text;
-                if (block.value) return block.value;
+    function walk(obj, depth) {
+        if (depth > 20 || !obj) return;
+        if (Array.isArray(obj)) {
+            for (const item of obj) walk(item, depth + 1);
+            return;
+        }
+        if (typeof obj !== 'object') return;
+        for (const [key, val] of Object.entries(obj)) {
+            if (typeof val === 'string' && val.length > 20) {
+                // Prioritize known output keys
+                const isOutputKey = /^(text|value|content|output_text|body)$/i.test(key);
+                candidates.push({ text: val, key: key, priority: isOutputKey ? 1 : 2 });
+            }
+            if (typeof val === 'object' && val !== null) {
+                walk(val, depth + 1);
             }
         }
-        // Direct text on item
-        if (item.text) return item.text;
     }
 
-    // Path 3: data.choices[0].message.content (Chat Completions fallback)
-    if (data.choices && data.choices[0] && data.choices[0].message) {
-        return data.choices[0].message.content || '';
+    walk(data, 0);
+
+    // Sort: priority first, then longest text
+    candidates.sort((a, b) => a.priority - b.priority || b.text.length - a.text.length);
+
+    if (candidates.length > 0) {
+        const best = candidates[0].text;
+        debugOut('=== EXTRACTED (' + candidates[0].key + ') ===');
+        debugOut(best.slice(0, 500));
+        return best;
     }
 
-    // Path 4: Deep scan — any string property that looks like the output
-    const jsonStr = JSON.stringify(data);
-    // Look for a text block anywhere in the tree
-    const textMatch = jsonStr.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-    if (textMatch) {
-        try {
-            return JSON.parse('"' + textMatch[1] + '"');
-        } catch { /* fall through */ }
-    }
-
-    console.error('Unable to extract text. Full response:', jsonStr.slice(0, 2000));
+    debugOut('!!! NO TEXT FOUND IN RESPONSE !!!');
     throw new Error('No text found in response output');
 }
 
