@@ -7,38 +7,38 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const screens = {
-    camera:     $('#screen-camera'),
+    camera: $('#screen-camera'),
     processing: $('#screen-processing'),
-    result:     $('#screen-result'),
+    result: $('#screen-result'),
 };
 
 const els = {
-    preview:      $('#camera-preview'),
-    canvas:       $('#camera-canvas'),
-    btnCapture:   $('#btn-capture'),
-    btnFile:      $('#btn-file'),
-    inputFile:    $('#input-file'),
-    btnRescan:    $('#btn-rescan'),
-    statusText:   $('#status-text'),
-    steps:        $$('.processing-step'),
-    resultThumb:  $('#result-thumb'),
-    apiKeyModal:  $('#modal-apikey'),
-    apiKeyInput:  $('#input-apikey'),
-    btnSaveKey:   $('#btn-save-key'),
+    preview: $('#camera-preview'),
+    canvas: $('#camera-canvas'),
+    btnCapture: $('#btn-capture'),
+    btnFile: $('#btn-file'),
+    inputFile: $('#input-file'),
+    btnRescan: $('#btn-rescan'),
+    statusText: $('#status-text'),
+    steps: $$('.processing-step'),
+    resultThumb: $('#result-thumb'),
+    apiKeyModal: $('#modal-apikey'),
+    apiKeyInput: $('#input-apikey'),
+    btnSaveKey: $('#btn-save-key'),
     // Camera screen extras
-    counterNum:    $('#counter-num'),
+    counterNum: $('#counter-num'),
     exportSection: $('#export-section'),
-    btnExport:     $('#btn-export'),
-    btnClear:      $('#btn-clear'),
+    btnExport: $('#btn-export'),
+    btnClear: $('#btn-clear'),
     // Form fields
-    fSalutation:  $('#field-salutation'),
-    fName:         $('#field-name'),
-    fTitle:        $('#field-title'),
-    fCompany:      $('#field-company'),
-    fEmail:        $('#field-email'),
-    fPhone:        $('#field-phone'),
-    fNotes:        $('#field-notes'),
-    emailConf:     $('#email-confidence'),
+    fSalutation: $('#field-salutation'),
+    fName: $('#field-name'),
+    fTitle: $('#field-title'),
+    fCompany: $('#field-company'),
+    fEmail: $('#field-email'),
+    fPhone: $('#field-phone'),
+    fNotes: $('#field-notes'),
+    emailConf: $('#email-confidence'),
 };
 
 let stream = null;
@@ -264,7 +264,7 @@ Fields to extract (use null if not visible on the badge):
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-4o',
+            model: 'gpt-5.5',
             messages: [
                 { role: 'system', content: systemPrompt },
                 {
@@ -400,11 +400,11 @@ function showResult(parsed, imageBlob) {
     if (parsed.email_confidence) {
         els.emailConf.textContent =
             parsed.email_confidence === 'high' ? '✓ High confidence guess' :
-            parsed.email_confidence === 'medium' ? '⚠ Medium confidence — verify please' :
-            '⚠ Low confidence — please verify';
+                parsed.email_confidence === 'medium' ? '⚠ Medium confidence — verify please' :
+                    '⚠ Low confidence — please verify';
         els.emailConf.className = 'email-confidence ' +
             (parsed.email_confidence === 'high' ? 'confident' :
-             parsed.email_confidence === 'low' ? 'uncertain' : 'uncertain');
+                parsed.email_confidence === 'low' ? 'uncertain' : 'uncertain');
     } else {
         els.emailConf.textContent = '';
     }
@@ -487,7 +487,7 @@ els.btnExport.addEventListener('click', () => {
         return;
     }
 
-    const headers = ['Salutation','Name','Title','Company','Email','Phone','Notes','Captured At'];
+    const headers = ['Salutation', 'Name', 'Title', 'Company', 'Email', 'Phone', 'Notes', 'Captured At'];
     const rows = contacts.map(c => [
         c.salutation, c.name, c.title, c.company,
         c.email, c.phone, c.notes, c.captured_at,
@@ -502,7 +502,7 @@ els.btnExport.addEventListener('click', () => {
     const a = document.createElement('a');
     a.href = url;
     const now = new Date();
-    a.download = `badgescan_export_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.csv`;
+    a.download = `badgescan_export_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 
