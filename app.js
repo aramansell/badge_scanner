@@ -281,7 +281,7 @@ Fields to extract (use null if not visible on the badge):
                 },
             ],
             max_output_tokens: 800,
-            temperature: 0,
+
         }),
     });
 
@@ -330,7 +330,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
             instructions: instructions,
             input: `Name: ${name}\nCompany: ${company}\n\nWhat is the most likely work email for this person?`,
             max_output_tokens: 200,
-            temperature: 0,
+
         }),
     });
 
