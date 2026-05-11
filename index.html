@@ -4,134 +4,134 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>BadgeScan — Instant Contact Capture</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <meta name="description" content="Scan conference badges, extract contacts with AI">
+    <title>BadgeScan</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📸</text></svg>">
 </head>
 <body>
-    <!-- Splash / Camera Screen -->
+
+    <!-- Camera / Main Screen -->
     <div id="screen-camera" class="screen active">
         <div class="header">
-            <div class="logo">Badge<span class="accent">Scan</span></div>
-            <div class="subtitle">Point camera at a badge. Tap to capture.</div>
+            <div>
+                <div class="logo">Badge<span class="accent">Scan</span></div>
+                <div class="subtitle">Scan a badge to capture contact</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btn-apikey" title="API Key">🔑</button>
         </div>
 
-        <div class="camera-wrap" id="camera-wrap">
-            <video id="camera-preview" playsinline autoplay muted></video>
+        <div class="camera-wrap">
+            <video id="camera-preview" autoplay playsinline muted></video>
             <canvas id="camera-canvas" style="display:none"></canvas>
             <div class="camera-overlay">
                 <div class="overlay-border"></div>
-                <span class="overlay-hint">Position badge here</span>
+                <div class="overlay-hint">Position badge inside frame</div>
             </div>
         </div>
 
-        <div class="actions" id="camera-actions">
-            <button id="btn-capture" class="btn btn-primary" disabled>
-                <span class="btn-icon">📸</span>
-                Capture Badge
-            </button>
-            <button id="btn-file" class="btn btn-ghost">
-                <span class="btn-icon">📁</span>
-                Or pick from gallery
-            </button>
-            <input type="file" id="input-file" accept="image/*" capture="environment" hidden>
+        <div class="actions">
+            <button class="btn btn-primary btn-full" id="btn-capture" disabled>📸 Capture Badge</button>
+            <button class="btn btn-ghost btn-full" id="btn-file">🖼 Upload Photo</button>
+            <input type="file" id="input-file" accept="image/*" capture="environment" style="display:none">
         </div>
 
-        <div class="counter-bar" id="counter-bar">
-            <span class="counter-label">Scanned today:</span>
+        <div class="counter-bar">
+            <span class="counter-label">Scanned:</span>
             <span class="counter-num" id="counter-num">0</span>
         </div>
 
-        <div class="export-section" id="export-section">
-            <button id="btn-export" class="btn btn-ghost btn-full">
-                Export All (.csv)
-            </button>
-            <button id="btn-clear" class="btn btn-ghost btn-sm btn-danger">Clear All</button>
+        <div class="export-section hidden" id="export-section">
+            <button class="btn btn-ghost btn-full btn-sm" id="btn-export">📥 Export CSV</button>
+            <button class="btn btn-ghost btn-full btn-sm btn-danger" id="btn-clear">🗑 Clear All Contacts</button>
         </div>
 
-        <div class="status" id="camera-status">
-            <span id="status-text">Allow camera access to begin</span>
-        </div>
+        <div class="status" id="status-text"></div>
     </div>
 
     <!-- Processing Screen -->
     <div id="screen-processing" class="screen">
+        <div class="header">
+            <div class="logo">Badge<span class="accent">Scan</span></div>
+        </div>
         <div class="processing">
             <div class="spinner"></div>
-            <div class="processing-step" id="step-1">📷 Analyzing badge image...</div>
-            <div class="processing-step pending" id="step-2">🔍 Finding contact details...</div>
-            <div class="processing-step pending" id="step-3">📧 Looking up email address...</div>
+            <div class="processing-step pending" id="step-0">📷 Reading badge...</div>
+            <div class="processing-step pending" id="step-1">🔍 Finding contact details...</div>
+            <div class="processing-step pending" id="step-2">📧 Looking up email address...</div>
         </div>
-        <pre id="debug-log" style="margin:16px;padding:12px;background:#000;color:#0f0;font-size:11px;max-height:200px;overflow:auto;display:none;border-radius:8px;white-space:pre-wrap;word-break:break-all;"></pre>
     </div>
 
     <!-- Result / Contact Form Screen -->
     <div id="screen-result" class="screen">
         <div class="header">
             <div class="logo">Badge<span class="accent">Scan</span></div>
-            <button id="btn-rescan" class="btn btn-ghost btn-sm">Re-scan</button>
+            <button class="btn btn-ghost btn-sm" id="btn-rescan">⬅ Rescan</button>
         </div>
 
         <div class="preview-wrap">
-            <img id="result-thumb" src="" alt="Badge preview">
+            <img id="result-thumb" alt="Badge preview">
         </div>
 
-        <form id="contact-form" class="contact-form">
-            <div class="form-group">
-                <label for="field-salutation">Salutation</label>
-                <input type="text" id="field-salutation" placeholder="Mr. / Ms. / Dr.">
+        <form class="contact-form" id="contact-form" autocomplete="off">
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>Salutation</label>
+                    <input id="f-salutation" type="text" placeholder="Mr./Ms./Dr.">
+                </div>
+                <div class="form-group" style="flex:3">
+                    <label>Name *</label>
+                    <input id="f-name" type="text" placeholder="Full name" required>
+                </div>
             </div>
+
             <div class="form-group">
-                <label for="field-name">Full Name *</label>
-                <input type="text" id="field-name" required placeholder="John Smith">
+                <label>Title</label>
+                <input id="f-title" type="text" placeholder="Job title">
             </div>
+
             <div class="form-group">
-                <label for="field-title">Title / Role</label>
-                <input type="text" id="field-title" placeholder="VP of Sales">
+                <label>Company</label>
+                <input id="f-company" type="text" placeholder="Company / Organization">
             </div>
+
             <div class="form-group">
-                <label for="field-company">Company</label>
-                <input type="text" id="field-company" placeholder="Acme Corp">
-            </div>
-            <div class="form-group">
-                <label for="field-email">Email *</label>
-                <input type="email" id="field-email" required placeholder="john@acmecorp.com">
+                <label>Email</label>
+                <input id="f-email" type="email" placeholder="email@example.com">
                 <span class="email-confidence" id="email-confidence"></span>
             </div>
+
             <div class="form-group">
-                <label for="field-phone">Phone</label>
-                <input type="tel" id="field-phone" placeholder="+1 (555) 000-0000">
+                <label>Phone</label>
+                <input id="f-phone" type="tel" placeholder="+1 (555) 000-0000">
             </div>
+
             <div class="form-group">
-                <label for="field-notes">Notes</label>
-                <textarea id="field-notes" rows="2" placeholder="Met at Booth #37, interested in enterprise plan..."></textarea>
+                <label>Notes</label>
+                <textarea id="f-notes" rows="2" placeholder="Where you met, what they do, follow-up..."></textarea>
             </div>
 
             <div class="form-actions">
-                <button type="submit" class="btn btn-primary btn-full" id="btn-save">
-                    <span class="btn-icon">💾</span>
-                    Save Contact
-                </button>
+                <button type="submit" class="btn btn-primary btn-full">✅ Save Contact</button>
             </div>
         </form>
     </div>
 
-    <!-- API Key Setup Modal -->
-    <div id="modal-apikey" class="modal">
+    <!-- API Key Modal -->
+    <div class="modal" id="modal-apikey">
         <div class="modal-bg"></div>
         <div class="modal-card">
-            <h2>Set Your OpenAI API Key</h2>
-            <p>Your key is stored only in your browser. We never see it.</p>
-            <input type="password" id="input-apikey" placeholder="sk-..." autocomplete="off">
-            <button id="btn-save-key" class="btn btn-primary btn-full">Save Key</button>
-            <p class="modal-hint">Get a key at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></p>
+            <h2>OpenAI API Key</h2>
+            <p>Your key is stored locally on this device and never sent anywhere except directly to OpenAI.</p>
+            <input type="password" id="input-apikey" placeholder="sk-...">
+            <p class="modal-hint">
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get an API key →</a>
+            </p>
+            <button class="btn btn-primary btn-full" id="btn-save-key">Save Key</button>
         </div>
     </div>
 
-    <script src="config.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

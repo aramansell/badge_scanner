@@ -1,7 +1,7 @@
 {
-    "name": "BadgeScan — Conference Contact Capture",
+    "name": "BadgeScan",
     "short_name": "BadgeScan",
-    "description": "Scan conference badges and instantly capture contact details with AI-powered email lookup.",
+    "description": "Scan conference badges, extract contacts with AI",
     "start_url": "/",
     "display": "standalone",
     "orientation": "portrait",
@@ -9,16 +9,14 @@
     "background_color": "#0f172a",
     "icons": [
         {
-            "src": "icons/icon-192.png",
+            "src": "icon-192.png",
             "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "any maskable"
+            "type": "image/png"
         },
         {
-            "src": "icons/icon-512.png",
+            "src": "icon-512.png",
             "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "any maskable"
+            "type": "image/png"
         }
     ]
 }

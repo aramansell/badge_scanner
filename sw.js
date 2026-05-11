@@ -1,6 +1,4 @@
-// BadgeScan Service Worker
-// Provides offline caching and PWA installability
-const CACHE_NAME = 'badgescan-v1';
+const CACHE = 'badgescan-v1';
 const ASSETS = [
     '/',
     '/index.html',
@@ -9,48 +7,24 @@ const ASSETS = [
     '/manifest.json',
 ];
 
-// Install: cache core assets
-self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            return cache.addAll(ASSETS);
-        }).then(() => self.skipWaiting())
+self.addEventListener('install', (e) => {
+    e.waitUntil(
+        caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
     );
+    self.skipWaiting();
 });
 
-// Activate: clean old caches
-self.addEventListener('activate', (event) => {
-    event.waitUntil(
-        caches.keys().then((keys) => {
-            return Promise.all(
-                keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-            );
-        }).then(() => self.clients.claim())
+self.addEventListener('activate', (e) => {
+    e.waitUntil(
+        caches.keys().then((keys) =>
+            Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+        )
     );
+    self.clients.claim();
 });
 
-// Fetch: cache-first for static assets, network-only for API calls
-self.addEventListener('fetch', (event) => {
-    const url = new URL(event.request.url);
-
-    // Never cache OpenAI API calls
-    if (url.hostname === 'api.openai.com') {
-        return;
-    }
-
-    // Cache-first for local assets
-    event.respondWith(
-        caches.match(event.request).then((cached) => {
-            return cached || fetch(event.request).then((response) => {
-                // Cache new responses
-                if (response.status === 200) {
-                    const clone = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(event.request, clone);
-                    });
-                }
-                return response;
-            });
-        })
+self.addEventListener('fetch', (e) => {
+    e.respondWith(
+        caches.match(e.request).then((cached) => cached || fetch(e.request))
     );
 });
