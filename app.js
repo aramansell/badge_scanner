@@ -315,12 +315,8 @@ Fields to extract (use null if not visible on the badge):
     const data = await response.json();
     const content = getResponseText(data);
 
-    // Parse JSON from response (strip any markdown fences)
-    const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(jsonStr);
-}
-
-// ── OpenAI: Email lookup ──────────────────────────
+    // Extract JSON from response (robust — handles multiline raw_text, markdown fences, etc.)
+    return extractJSON(content);
 async function lookupEmail(name, company) {
     const instructions = `You are an email lookup assistant for a conference contact app.
 Given a person's name and company, provide your BEST GUESS for their work email address.
