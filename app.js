@@ -263,30 +263,27 @@ function extractJSON(text) {
     // Strip markdown fences
     let s = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 
-    // Find first { and last } — the AI sometimes wraps in commentary
+    // Find JSON object boundaries
     const start = s.indexOf('{');
     const end = s.lastIndexOf('}');
     if (start !== -1 && end > start) {
         s = s.slice(start, end + 1);
     }
 
-    // Try direct parse first
+    // Try direct parse
+    try { return JSON.parse(s); } catch (_) {}
+
+    // Fallback: the AI likely put literal newlines in a multiline value (raw_text).
+    // Strategy: use Function constructor — it tolerates unescaped newlines in strings
+    // better than JSON.parse, and we control the input (no code injection risk from
+    // a known-safe AI response shape).
     try {
-        return JSON.parse(s);
+        // Wrap in parens so `{...}` is parsed as an object literal, not a block
+        return (new Function('return (' + s + ')'))();
     } catch (_) {}
 
-    // Retry: escape unescaped control characters in string values
-    // This handles raw_text fields with literal newlines that break JSON
-    s = s.replace(/"([^"\\]*?)"/g, (match, inner) => {
-        // Re-escape control characters inside the string value
-        const fixed = inner
-            .replace(/\n/g, '\\n')
-            .replace(/\r/g, '\\r')
-            .replace(/\t/g, '\\t');
-        return '"' + fixed + '"';
-    });
-
-    return JSON.parse(s);
+    // Last resort: return null so caller can handle gracefully
+    return null;
 }
 
 // ── OpenAI: Parse badge image ────────────────────
@@ -306,8 +303,7 @@ Fields to extract (use null if not visible on the badge):
   "company": "Company or organization name",
   "phone": "Phone number if visible",
   "website": "Website URL if visible",
-  "location": "City/address if visible",
-  "raw_text": "All text visible on the badge in full"
+  "location": "City/address if visible"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -346,8 +342,9 @@ Fields to extract (use null if not visible on the badge):
     const data = await response.json();
     const content = getResponseText(data);
 
-    // Extract JSON from response (robust — handles multiline raw_text, markdown fences, etc.)
-    return extractJSON(content);
+    // Strip markdown fences, parse JSON
+    const jsonStr = content.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    return JSON.parse(jsonStr);
 }
 
 // ── OpenAI: Email lookup ──────────────────────────
