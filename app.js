@@ -393,8 +393,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
 
     const data = await response.json();
     const content = getResponseText(data);
-    const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(jsonStr);
+    return extractJSON(content);
 }
 
 // ── Show result screen ────────────────────────────
