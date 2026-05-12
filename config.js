@@ -13,7 +13,7 @@
 // 4. Start scanning!
 //
 // MODELS USED (Responses API):
-// - Both parsing and email lookup use: gpt-5.4-mini
+// - Both parsing and email lookup use: gpt-5.5
 // - Calls go to: https://api.openai.com/v1/responses
 //
 // The app is a static PWA — deploy to Netlify, Vercel, GitHub Pages,
