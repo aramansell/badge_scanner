@@ -24,6 +24,7 @@ const els = {
     resultThumb: $('#result-thumb'),
     apiKeyModal: $('#modal-apikey'),
     apiKeyInput: $('#input-apikey'),
+    confInput: $('#input-conference'),
     btnSaveKey: $('#btn-save-key'),
     // Camera screen extras
     counterNum: $('#counter-num'),
@@ -69,6 +70,15 @@ function setApiKey(key) {
     localStorage.setItem('badgescan_openai_key', key.trim());
 }
 
+// ── Conference name ──────────────────────────────
+function getConference() {
+    return localStorage.getItem('badgescan_conference') || '';
+}
+
+function setConference(name) {
+    localStorage.setItem('badgescan_conference', name.trim());
+}
+
 // ── Contacts storage ─────────────────────────────
 function getContacts() {
     try {
@@ -102,11 +112,11 @@ function exportCSV() {
     const contacts = getContacts();
     if (!contacts.length) return toast('No contacts to export', true);
 
-    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Notes', 'Captured'];
+    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Conference', 'Notes', 'Captured'];
     const rows = contacts.map((c) =>
         [
             c.name, c.salutation, c.title, c.company,
-            c.email, c.phone, c.notes, c.captured_at,
+            c.email, c.phone, c.conference, c.notes, c.captured_at,
         ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
     );
 
@@ -324,18 +334,34 @@ function getResponseText(data) {
 // ── OpenAI: Parse badge image ────────────────────
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
+    const conference = getConference();
+
+    const confHint = conference
+        ? `CRITICAL: This badge was scanned at the "${conference}" conference.\n` +
+          `"${conference}" is the EVENT NAME, NOT the person's company.\n` +
+          `When determining the "company" field, IGNORE any text that matches the conference name.\n` +
+          `The company should be the employer/organization the person works for, not the event.\n` +
+          `Look for employer branding/logos separate from the conference branding.\n\n`
+        : '';
 
     const instructions = `You are a badge scanner for a conference contact capture app.
 Analyze this image of a conference badge or business card.
 Extract every piece of information you can see. Do not make up information.
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object.
 
+${confHint}IMPORTANT ABOUT QR CODES: Many badges have a QR code printed on them.
+This QR code typically links to the conference website, event app, or registration system.
+The QR code content is NOT the person's company or employer.
+When determining the "company" field, COMPLETELY IGNORE any QR codes and any text
+embedded in or near the QR code. The person's real company comes from logos,
+employer badges, or other non-QR branding on the badge.
+
 Fields to extract (use null if not visible on the badge):
 {
   "salutation": "Mr./Ms./Dr./Prof./etc or null",
   "name": "Full name as written on the badge",
   "title": "Job title or role",
-  "company": "Company or organization name",
+  "company": "Company or organization name (NOT the conference/event name)",
   "phone": "Phone number if visible",
   "website": "Website URL if visible",
   "location": "City/address if visible",
@@ -558,6 +584,7 @@ els.contactForm.addEventListener('submit', (e) => {
         company: els.fCompany.value.trim(),
         email: els.fEmail.value.trim(),
         phone: els.fPhone.value.trim(),
+        conference: getConference(),
         notes: els.fNotes.value.trim(),
         captured_at: new Date().toISOString(),
     };
@@ -585,6 +612,7 @@ els.btnClear.addEventListener('click', clearAllContacts);
 // ── API Key modal ─────────────────────────────────
 $('#btn-apikey').addEventListener('click', () => {
     els.apiKeyInput.value = getApiKey();
+    els.confInput.value = getConference();
     els.apiKeyModal.classList.add('active');
 });
 
@@ -594,10 +622,12 @@ $('.modal-bg').addEventListener('click', () => {
 
 els.btnSaveKey.addEventListener('click', () => {
     const key = els.apiKeyInput.value.trim();
+    const conf = els.confInput.value.trim();
     if (!key) return toast('Please enter an API key', true);
     setApiKey(key);
+    setConference(conf);
     els.apiKeyModal.classList.remove('active');
-    toast('API key saved');
+    toast('Settings saved');
 });
 
 // ── Init ──────────────────────────────────────────

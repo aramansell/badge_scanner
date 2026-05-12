@@ -123,13 +123,20 @@
     <div class="modal" id="modal-apikey">
         <div class="modal-bg"></div>
         <div class="modal-card">
-            <h2>OpenAI API Key</h2>
-            <p>Your key is stored locally on this device and never sent anywhere except directly to OpenAI.</p>
-            <input type="password" id="input-apikey" placeholder="sk-...">
+            <h2>Setup</h2>
+            <div class="form-group">
+                <label>Conference Name</label>
+                <input type="text" id="input-conference" placeholder="e.g. AAPA 2026, ACCOM">
+                <p class="modal-hint">Used to avoid mistaking the conference for a company name.</p>
+            </div>
+            <div class="form-group">
+                <label>OpenAI API Key</label>
+                <input type="password" id="input-apikey" placeholder="sk-...">
+            </div>
             <p class="modal-hint">
                 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get an API key →</a>
             </p>
-            <button class="btn btn-primary btn-full" id="btn-save-key">Save Key</button>
+            <button class="btn btn-primary btn-full" id="btn-save-key">Save</button>
         </div>
     </div>
 
