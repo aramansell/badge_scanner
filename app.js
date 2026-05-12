@@ -375,7 +375,7 @@ Fields to extract (use null if not visible on the badge):
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-5.5',
+            model: 'gpt-5.4-mini',
             instructions: instructions,
             input: [
                 {
@@ -440,7 +440,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
             'Authorization': `Bearer ${getApiKey()}`,
         },
         body: JSON.stringify({
-            model: 'gpt-5.5',
+            model: 'gpt-5.4-mini',
             instructions: instructions,
             input: [
                 {
