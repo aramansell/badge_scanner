@@ -30,6 +30,7 @@ const els = {
     counterNum: $('#counter-num'),
     exportSection: $('#export-section'),
     btnExport: $('#btn-export'),
+    btnExportImages: $('#btn-export-images'),
     btnClear: $('#btn-clear'),
     // Form fields
     fSalutation: $('#f-salutation'),
@@ -45,6 +46,274 @@ const els = {
 
 let stream = null;
 let currentImage = null;
+
+// ── Contact Store (OPFS) ──────────────────────────
+// All contacts + badge images live in OPFS:
+//   contacts/{uuid}/contact.json  — the contact record
+//   contacts/{uuid}/badge.jpg     — the badge photo
+// localStorage holds only a lightweight index [{id, name}] for fast UI.
+// An in-memory cache avoids making every read async.
+
+const CONTACTS_DIR = 'contacts';
+let _contactsCache = [];      // full contact objects, kept in sync with OPFS
+let _contactsReady = false;   // true after init() finishes loading
+
+async function _contactsRoot() {
+    const root = await navigator.storage.getDirectory();
+    return root.getDirectoryHandle(CONTACTS_DIR, { create: true });
+}
+
+async function _contactDir(contactId) {
+    const root = await _contactsRoot();
+    return root.getDirectoryHandle(contactId, { create: true });
+}
+
+async function _writeJSON(handle, name, obj) {
+    const file = await handle.getFileHandle(name, { create: true });
+    const w = await file.createWritable();
+    await w.write(new Blob([JSON.stringify(obj)], { type: 'application/json' }));
+    await w.close();
+}
+
+async function _readJSON(handle, name) {
+    try {
+        const file = await handle.getFileHandle(name);
+        const f = await file.getFile();
+        return JSON.parse(await f.text());
+    } catch {
+        return null;
+    }
+}
+
+async function _writeBlob(handle, name, blob) {
+    const file = await handle.getFileHandle(name, { create: true });
+    const w = await file.createWritable();
+    await w.write(blob);
+    await w.close();
+}
+
+async function _readBlob(handle, name) {
+    try {
+        const file = await handle.getFileHandle(name);
+        return await file.getFile();
+    } catch {
+        return null;
+    }
+}
+
+// ── Save / Load contacts ──────────────────────────
+async function _saveIndex() {
+    // Thin index for fast counter updates (no async needed after init)
+    const idx = _contactsCache.map(c => ({ id: c.id, name: c.name }));
+    localStorage.setItem('badgescan_index', JSON.stringify(idx));
+}
+
+async function storeContact(contact, imageBlob) {
+    const id = contact.id || crypto.randomUUID();
+    contact.id = id;
+
+    const dir = await _contactDir(id);
+    await _writeJSON(dir, 'contact.json', contact);
+    if (imageBlob) {
+        await _writeBlob(dir, 'badge.jpg', imageBlob);
+    }
+
+    // Update in-memory cache
+    const existing = _contactsCache.findIndex(c => c.id === id);
+    if (existing >= 0) {
+        _contactsCache[existing] = contact;
+    } else {
+        _contactsCache.unshift(contact);
+    }
+
+    await _saveIndex();
+    updateCounter();
+    return id;
+}
+
+async function deleteContact(contactId) {
+    try {
+        const root = await _contactsRoot();
+        await root.removeEntry(contactId, { recursive: true });
+    } catch { /* already gone */ }
+
+    _contactsCache = _contactsCache.filter(c => c.id !== contactId);
+    await _saveIndex();
+    updateCounter();
+}
+
+async function clearAllContacts() {
+    if (!confirm('Delete all scanned contacts? This cannot be undone.')) return;
+
+    try {
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry(CONTACTS_DIR, { recursive: true });
+    } catch { /* already gone */ }
+
+    _contactsCache = [];
+    localStorage.removeItem('badgescan_index');
+    updateCounter();
+    toast('All contacts cleared');
+}
+
+async function loadAllContacts() {
+    // Read every contact.json from OPFS and populate the cache.
+    // Called once during init.
+    const contacts = [];
+    try {
+        const root = await _contactsRoot();
+        for await (const [name, handle] of root.entries()) {
+            if (handle.kind !== 'directory') continue;
+            const data = await _readJSON(handle, 'contact.json');
+            if (data) contacts.push(data);
+        }
+    } catch {
+        // No contacts yet — that's fine
+    }
+
+    // Sort by captured_at descending (newest first)
+    contacts.sort((a, b) => (b.captured_at || '').localeCompare(a.captured_at || ''));
+    _contactsCache = contacts;
+    _contactsReady = true;
+    await _saveIndex();
+    updateCounter();
+}
+
+// ── Sync getters (fast, from in-memory cache) ─────
+function getContacts() {
+    return _contactsCache;
+}
+
+// ── Image helpers ──────────────────────────────────
+async function getContactImage(contactId) {
+    try {
+        const dir = await _contactDir(contactId);
+        return await _readBlob(dir, 'badge.jpg');
+    } catch {
+        return null;
+    }
+}
+
+// ── CSV Export (now async, reads from OPFS) ────────
+async function exportCSV() {
+    const contacts = getContacts();
+    if (!contacts.length) return toast('No contacts to export', true);
+
+    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Conference', 'Notes', 'Captured'];
+    const rows = contacts.map((c) =>
+        [
+            c.name, c.salutation, c.title, c.company,
+            c.email, c.phone, c.conference, c.notes, c.captured_at,
+        ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
+    );
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `badgescan-contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${contacts.length} contacts`);
+}
+
+// ── Image Export (reads from OPFS contact dirs) ────
+async function exportAllImages() {
+    const contacts = getContacts();
+    let count = 0;
+
+    // Try directory picker first (Chrome/Edge)
+    if (typeof showDirectoryPicker === 'function') {
+        try {
+            const dirHandle = await showDirectoryPicker({ mode: 'readwrite' });
+            for (const contact of contacts) {
+                const img = await getContactImage(contact.id);
+                if (!img) continue;
+                const safeName = (contact.name || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+                const fileName = `${safeName}_${contact.id}.jpg`;
+                const fh = await dirHandle.getFileHandle(fileName, { create: true });
+                const w = await fh.createWritable();
+                await w.write(img);
+                await w.close();
+                count++;
+            }
+            toast(`Saved ${count} badge images to folder`);
+            return count;
+        } catch (err) {
+            if (err.name === 'AbortError') return 0;
+            console.error('Directory picker failed, falling back to downloads:', err);
+        }
+    }
+
+    // Fallback: download one at a time
+    for (const contact of contacts) {
+        const img = await getContactImage(contact.id);
+        if (!img) continue;
+        const safeName = (contact.name || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+        const url = URL.createObjectURL(img);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeName}_${contact.id}.jpg`;
+        a.click();
+        URL.revokeObjectURL(url);
+        count++;
+        await new Promise(r => setTimeout(r, 150));
+    }
+
+    if (count > 0) toast(`Downloaded ${count} badge images`);
+    return count;
+}
+
+// ── Migration: move old localStorage contacts + images into OPFS ──
+async function _migrateOldData() {
+    // Check if OPFS already has contacts
+    let hasExisting = false;
+    try {
+        const root = await _contactsRoot();
+        for await (const [_name, handle] of root.entries()) {
+            if (handle.kind === 'directory') { hasExisting = true; break; }
+        }
+    } catch {}
+
+    if (hasExisting) return; // already migrated or fresh OPFS
+
+    // Try to move old localStorage contacts
+    const oldContacts = (() => {
+        try { return JSON.parse(localStorage.getItem('badgescan_contacts') || '[]'); }
+        catch { return []; }
+    })();
+
+    // Try to move old flat image store
+    const OLD_IMAGE_DIR = 'badge_images';
+    const imageMap = new Map(); // image_id → Blob
+    try {
+        const root = await navigator.storage.getDirectory();
+        const oldImgDir = await root.getDirectoryHandle(OLD_IMAGE_DIR);
+        for await (const [name, handle] of oldImgDir.entries()) {
+            if (!name.endsWith('.jpg')) continue;
+            const id = name.replace('.jpg', '');
+            const file = await handle.getFile();
+            imageMap.set(id, file);
+        }
+    } catch { /* no old images */ }
+
+    if (oldContacts.length === 0) return;
+
+    for (const contact of oldContacts) {
+        if (!contact.id) contact.id = contact.image_id || crypto.randomUUID();
+        const img = contact.image_id ? (imageMap.get(contact.image_id) || null) : null;
+        await storeContact(contact, img);
+    }
+
+    // Remove old data so we don't double-migrate
+    localStorage.removeItem('badgescan_contacts');
+    try {
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry(OLD_IMAGE_DIR, { recursive: true });
+    } catch {}
+}
 
 // ── Screen navigation ────────────────────────────
 function showScreen(name) {
@@ -79,63 +348,13 @@ function setConference(name) {
     localStorage.setItem('badgescan_conference', name.trim());
 }
 
-// ── Contacts storage ─────────────────────────────
-function getContacts() {
-    try {
-        return JSON.parse(localStorage.getItem('badgescan_contacts') || '[]');
-    } catch {
-        return [];
-    }
-}
-
-function saveContacts(contacts) {
-    localStorage.setItem('badgescan_contacts', JSON.stringify(contacts));
-    updateCounter();
-}
-
-function addContact(contact) {
-    const contacts = getContacts();
-    contacts.unshift(contact);
-    saveContacts(contacts);
-}
-
+// ── Counter (sync, uses in-memory cache) ───────────
 function updateCounter() {
     const count = getContacts().length;
     if (els.counterNum) els.counterNum.textContent = count;
     if (els.exportSection) {
         els.exportSection.classList.toggle('hidden', count === 0);
     }
-}
-
-// ── CSV Export ────────────────────────────────────
-function exportCSV() {
-    const contacts = getContacts();
-    if (!contacts.length) return toast('No contacts to export', true);
-
-    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Conference', 'Notes', 'Captured'];
-    const rows = contacts.map((c) =>
-        [
-            c.name, c.salutation, c.title, c.company,
-            c.email, c.phone, c.conference, c.notes, c.captured_at,
-        ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
-    );
-
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `badgescan-contacts-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast(`Exported ${contacts.length} contacts`);
-}
-
-function clearAllContacts() {
-    if (!confirm('Delete all scanned contacts? This cannot be undone.')) return;
-    saveContacts([]);
-    toast('All contacts cleared');
 }
 
 // ── Camera ────────────────────────────────────────
@@ -574,7 +793,7 @@ els.btnRescan.addEventListener('click', () => {
 });
 
 // ── Event: Save contact ───────────────────────────
-els.contactForm.addEventListener('submit', (e) => {
+els.contactForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const contact = {
@@ -594,20 +813,31 @@ els.contactForm.addEventListener('submit', (e) => {
         return;
     }
 
-    addContact(contact);
+    // Store contact + badge image in OPFS
+    await storeContact(contact, currentImage || null);
     toast(`Saved: ${contact.name}`);
 
     // Reset and go back to camera
+    currentImage = null;
     els.contactForm.reset();
     showScreen('camera');
     startCamera();
 });
 
-// ── Event: Export ─────────────────────────────────
-els.btnExport.addEventListener('click', exportCSV);
+// ── Event: Export CSV ──────────────────────────────
+els.btnExport.addEventListener('click', () => {
+    exportCSV().catch(err => toast('Export failed: ' + err.message, true));
+});
 
-// ── Event: Clear ──────────────────────────────────
-els.btnClear.addEventListener('click', clearAllContacts);
+// ── Event: Export Images ──────────────────────────
+els.btnExportImages.addEventListener('click', () => {
+    exportAllImages().catch(err => toast('Image export failed: ' + err.message, true));
+});
+
+// ── Event: Clear All ──────────────────────────────
+els.btnClear.addEventListener('click', () => {
+    clearAllContacts().catch(err => toast('Clear failed: ' + err.message, true));
+});
 
 // ── API Key modal ─────────────────────────────────
 $('#btn-apikey').addEventListener('click', () => {
@@ -631,19 +861,20 @@ els.btnSaveKey.addEventListener('click', () => {
 });
 
 // ── Init ──────────────────────────────────────────
-function init() {
+async function init() {
     // Register service worker
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
 
+    // Load contacts from OPFS (migrates old localStorage data on first run)
+    await _migrateOldData();
+    await loadAllContacts();
+
     // Check for API key
     if (!getApiKey()) {
         els.apiKeyModal.classList.add('active');
     }
-
-    // Update contact counter
-    updateCounter();
 
     // Start camera
     startCamera();
