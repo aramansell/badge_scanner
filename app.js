@@ -664,35 +664,41 @@ Step 1: Identify the most likely employer.
   that trains PAs or employs PAs in a teaching hospital setting.
 
   Use web_search. Search queries to try:
-  - "${city} teaching hospital PA program"
-  - "${city} medical university physician assistant program"
-  - "${state} PA residency ${specialty}"
-  - "${city} academic medical center ${specialty}"
+  - "${location} teaching hospital PA program"
+  - "${location} medical university physician assistant program"
+  - "${location} academic medical center"
+  - "${name} ${location}"
 
   Narrow to the 1-2 most likely institutions based on the person's specialty
   (${spec}) and the fact they're at AAPA.
 
 Step 2: Match the person to that institution.
   Search for "${name}" at the institution you identified. Try:
-  - "${name}" + the institution name
-  - "${name} ${creds}" + the institution name
-  - "${name} ${specialty} ${city}"
+  - "${name}" combined with the institution name
+  - "${name} PA" or "${name} ${creds}" combined with the institution name
+  - "${name} ${location}"
 
 Step 3: Find their email.
   Same approach — look for public listings, directory pages, or determine
   the institution's email format and construct the best guess.
+  If you find the institution's standard email format (e.g. first.last@ohsu.edu),
+  apply it. If you find the person on a directory page, use that email directly.
 
 IMPORTANT RULES:
 - Only consider teaching hospitals and medical schools/universities WITH a PA program.
+- If ${location} is Portland, OR — OHSU is a major teaching hospital there. Duke in
+  Durham, NC. UCSF in San Francisco. Use your web_search to find the right one.
 - Do NOT pick random clinics, private practices, or non-teaching hospitals.
-- If you cannot find a match, pick the most likely teaching hospital in that
-  city and guess the email using its naming convention.
-- NEVER return "unknown" or skip — always produce your best guess.
+- If you cannot find a match, pick the most likely teaching hospital in
+  ${location} and guess the email using its naming convention.
+- You MUST search the web. Do not guess without searching.
+- NEVER use placeholder text like "institution.edu" — always produce a real domain
+  from your web search results.
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "company": "Resolved institution name",
-  "email": "best_email_guess@institution.edu",
+  "company": "The actual institution name you found",
+  "email": "The actual email you derived (e.g. jane.smith@ohsu.edu)",
   "confidence": "high|medium|low",
   "reasoning": "One sentence explaining which institution you found and how you derived the email"
 }`;
