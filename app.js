@@ -46,6 +46,7 @@ const els = {
 
 let stream = null;
 let currentImage = null;
+let _currentParsed = null;  // parsed badge data from OCR, merged on save
 
 // ── Contact Store (OPFS) ──────────────────────────
 // All contacts + badge images live in OPFS:
@@ -199,11 +200,11 @@ async function exportCSV() {
     const contacts = getContacts();
     if (!contacts.length) return toast('No contacts to export', true);
 
-    const headers = ['Name', 'Salutation', 'Title', 'Company', 'Email', 'Phone', 'Conference', 'Notes', 'Captured'];
+    const headers = ['Name', 'Credentials', 'Salutation', 'Title', 'Specialty', 'Company', 'Email', 'Phone', 'City', 'State', 'Notes', 'Captured'];
     const rows = contacts.map((c) =>
         [
-            c.name, c.salutation, c.title, c.company,
-            c.email, c.phone, c.conference, c.notes, c.captured_at,
+            c.name, c.credentials, c.salutation, c.title, c.specialty,
+            c.company, c.email, c.phone, c.city, c.state, c.notes, c.captured_at,
         ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
     );
 
@@ -553,38 +554,39 @@ function getResponseText(data) {
 // ── OpenAI: Parse badge image ────────────────────
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
-    const conference = getConference();
-
-    const confHint = conference
-        ? `CRITICAL: This badge was scanned at the "${conference}" conference.\n` +
-          `"${conference}" is the EVENT NAME, NOT the person's company.\n` +
-          `When determining the "company" field, IGNORE any text that matches the conference name.\n` +
-          `The company should be the employer/organization the person works for, not the event.\n` +
-          `Look for employer branding/logos separate from the conference branding.\n\n`
-        : '';
 
     const instructions = `You are a badge scanner for a conference contact capture app.
-Analyze this image of a conference badge or business card.
-Extract every piece of information you can see. Do not make up information.
+Analyze this image of an AAPA conference badge.
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object.
 
-${confHint}IMPORTANT ABOUT QR CODES: Many badges have a QR code printed on them.
-This QR code typically links to the conference website, event app, or registration system.
-The QR code content is NOT the person's company or employer.
-When determining the "company" field, COMPLETELY IGNORE any QR codes and any text
-embedded in or near the QR code. The person's real company comes from logos,
-employer badges, or other non-QR branding on the badge.
+BADGE LAYOUT (top to bottom):
+  Line 1: Conference name — "AAPA 2026" (the event, NOT the employer)
+  Line 2: FIRST NAME in large bold text
+  Line 3: LAST NAME followed by credentials (PA-C, MD, DO, NP, RN, etc.)
+  Line 4: Specialty (e.g. "Hematology and Oncology", "Pediatrics", "Family Medicine")
+  Line 5: CITY, STATE (the person's work location)
+  Below line 5: QR code, sponsor ads, badge access level — ALL MEANINGLESS, IGNORE EVERYTHING BELOW LINE 5
 
-Fields to extract (use null if not visible on the badge):
+CRITICAL RULES:
+- The company/employer name is NOT printed on this badge. Do not guess it here.
+  Set "company" to null unless you literally see an employer name printed on the badge.
+- CREDENTIALS (PA-C, MD, DO, etc.) are part of the title field, appended after the name.
+  Parse them out — do not leave them in the name field.
+- "AAPA 2026" is the CONFERENCE, not the company. Never use it as the company.
+- QR codes and anything near them are noise. Ignore them completely.
+
+Fields to extract:
 {
-  "salutation": "Mr./Ms./Dr./Prof./etc or null",
-  "name": "Full name as written on the badge",
-  "title": "Job title or role",
-  "company": "Company or organization name (NOT the conference/event name)",
-  "phone": "Phone number if visible",
-  "website": "Website URL if visible",
-  "location": "City/address if visible",
-  "raw_text": "All text visible on the badge in full"
+  "salutation": "Dr./Prof./Mr./Ms. or null",
+  "name": "Full name WITHOUT credentials (e.g. 'Jane Smith', not 'Jane Smith PA-C')",
+  "credentials": "PA-C, MD, DO, NP, RN, etc. or null",
+  "title": "Job title/role if shown (e.g. 'Director', 'Dean', 'Associate Professor') or null",
+  "specialty": "Medical specialty if shown (e.g. 'Hematology and Oncology', 'Pediatrics') or null",
+  "company": "ONLY set to a company name if one is explicitly printed on the badge. Otherwise null.",
+  "city": "City from the badge (e.g. 'Durham') or null",
+  "state": "State abbreviation from the badge (e.g. 'NC') or null",
+  "phone": "Phone number if visible or null",
+  "raw_text": "All meaningful text visible on the badge (exclude QR codes and ads below city/state)"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -625,22 +627,125 @@ Fields to extract (use null if not visible on the badge):
     return extractJSON(content);
 }
 
-// ── OpenAI: Email lookup ──────────────────────────
-async function lookupEmail(name, company) {
+// ── OpenAI: Institution resolver + email lookup ────
+// When company is on the badge, uses it directly. When not, searches for
+// teaching hospitals / universities with PA programs in the given city+state
+// and matches the person.
+async function resolveInstitution(parsed) {
+    const { name, company, title, credentials, specialty, city, state } = parsed;
+
+    // Branch 1: company is known — straightforward email lookup
+    if (company) {
+        return lookupEmailSimple(name, company);
+    }
+
+    // Branch 2: no company — must resolve institution from city+state+specialty
+    const location = city && state ? `${city}, ${state}` : (city || state || 'unknown location');
+    const spec = specialty || 'unknown specialty';
+    const creds = credentials || 'PA';
+    const role = title || '';
+
+    const instructions = `You are a medical conference lead-capture assistant.
+Your job: given a person at the AAPA 2026 conference, find their employer and email.
+
+PERSON DETAILS:
+  Name: ${name}
+  Credentials: ${creds}
+  Title/Role: ${role || 'not listed'}
+  Specialty: ${spec}
+  Location (from badge): ${location}
+
+CRITICAL — WHAT TO DO:
+
+Step 1: Identify the most likely employer.
+  This person works in ${location}. Find teaching hospitals and medical universities
+  in ${location} that have a PA program (Physician Assistant program).
+  This is a PA conference — the person almost certainly works at an institution
+  that trains PAs or employs PAs in a teaching hospital setting.
+
+  Use web_search. Search queries to try:
+  - "${city} teaching hospital PA program"
+  - "${city} medical university physician assistant program"
+  - "${state} PA residency ${specialty}"
+  - "${city} academic medical center ${specialty}"
+
+  Narrow to the 1-2 most likely institutions based on the person's specialty
+  (${spec}) and the fact they're at AAPA.
+
+Step 2: Match the person to that institution.
+  Search for "${name}" at that institution. Try:
+  - "${name} ${institution}"
+  - "${name} ${creds} ${institution}"
+  - "${name} ${specialty} ${city}"
+
+Step 3: Find their email.
+  Same approach — look for public listings, directory pages, or determine
+  the institution's email format and construct the best guess.
+
+IMPORTANT RULES:
+- Only consider teaching hospitals and medical schools/universities WITH a PA program.
+- Do NOT pick random clinics, private practices, or non-teaching hospitals.
+- If you cannot find a match, pick the most likely teaching hospital in that
+  city and guess the email using its naming convention.
+- NEVER return "unknown" or skip — always produce your best guess.
+
+Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
+{
+  "company": "Resolved institution name",
+  "email": "best_email_guess@institution.edu",
+  "confidence": "high|medium|low",
+  "reasoning": "One sentence explaining which institution you found and how you derived the email"
+}`;
+
+    const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getApiKey()}`,
+        },
+        body: JSON.stringify({
+            model: 'gpt-5.5',
+            instructions: instructions,
+            input: [
+                {
+                    type: 'message',
+                    role: 'user',
+                    content: [
+                        { type: 'input_text', text: `Resolve the employer and email for ${name} (${creds}) who practices ${spec} in ${location}.` },
+                    ],
+                },
+            ],
+            tools: [{ type: 'web_search' }],
+            max_output_tokens: 800,
+        }),
+    });
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error (${response.status})`);
+    }
+
+    const data = await response.json();
+    const content = getResponseText(data);
+    return extractJSON(content);
+}
+
+// ── Simple email lookup (when company is already known) ──
+async function lookupEmailSimple(name, company) {
     const instructions = `You are an email lookup assistant for a conference contact app.
 Given a person's name and company, find their work email address.
 
 IMPORTANT: You MUST use the web_search tool to search for this person's email.
 Search queries to try (in order):
-1. "[name] [company] email" — find their actual email if publicly listed
-2. "[company] email format" — determine the company's email naming convention
-3. "[company] [name] linkedin" — find their LinkedIn for title/email hints
+1. "${name} ${company} email" — find their actual email if publicly listed
+2. "${company} email format" — determine the company's email naming convention
+3. "${company} ${name} linkedin" — find their LinkedIn for title/email hints
 
 After searching, synthesize what you find into the best email guess.
 If you found an actual email, use it. If not, use the company's naming pattern.
 NEVER use placeholder values — always provide a real email guess.
 
-Common patterns to consider: first@company.com, first.last@company.com, 
+Common patterns to consider: first@company.com, first.last@company.com,
 firstinitiallast@company.com, first_last@company.com.
 
 Also provide a confidence level and one-sentence reasoning about what you found.
@@ -677,7 +782,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
 
     if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Email lookup failed (${response.status})`);
+        throw new Error(err.error?.message || `API error (${response.status})`);
     }
 
     const data = await response.json();
@@ -698,9 +803,17 @@ function showResult(parsed, imageBlob) {
     els.fCompany.value = parsed.company || '';
     els.fEmail.value = parsed.email || '';
     els.fPhone.value = parsed.phone || '';
-    els.fNotes.value = parsed.location
-        ? `Met at conference. Location from badge: ${parsed.location}`
-        : 'Met at conference.';
+
+    // Build notes from badge metadata
+    const parts = [];
+    if (parsed.credentials) parts.push(parsed.credentials);
+    if (parsed.specialty) parts.push(parsed.specialty);
+    if (parsed.city && parsed.state) parts.push(`${parsed.city}, ${parsed.state}`);
+    else if (parsed.city) parts.push(parsed.city);
+    else if (parsed.state) parts.push(parsed.state);
+    els.fNotes.value = parts.length
+        ? `Met at AAPA 2026. Badge: ${parts.join(' — ')}`
+        : 'Met at AAPA 2026.';
 
     // Email confidence indicator
     if (parsed.email_confidence) {
@@ -714,6 +827,9 @@ function showResult(parsed, imageBlob) {
     } else {
         els.emailConf.textContent = '';
     }
+
+    // Stash parsed data for merge on save
+    _currentParsed = parsed;
 
     showScreen('result');
 }
@@ -729,7 +845,7 @@ async function processImage(imageBlob) {
     });
     els.steps[0].textContent = '📷 Reading badge...';
     els.steps[1].textContent = '🔍 Finding contact details...';
-    els.steps[2].textContent = '📧 Looking up email address...';
+    els.steps[2].textContent = '📧 Resolving institution & email...';
 
     try {
         // Step 1: OCR / parse badge with Vision
@@ -744,19 +860,19 @@ async function processImage(imageBlob) {
         }
         setStep(1, 'done');
 
-        // Step 3: Email lookup (if we have name + company)
-        if (parsedData.name && parsedData.company) {
-            setStep(2, 'in_progress');
-            const emailResult = await lookupEmail(parsedData.name, parsedData.company);
-            if (emailResult) {
-                parsedData.email = emailResult.email;
-                parsedData.email_confidence = emailResult.confidence;
-                parsedData.email_reasoning = emailResult.reasoning;
+        // Step 3: Institution resolver + email lookup
+        setStep(2, 'in_progress');
+        const resolved = await resolveInstitution(parsedData);
+        if (resolved) {
+            // Only override company if we resolved one (don't wipe an existing one)
+            if (resolved.company && !parsedData.company) {
+                parsedData.company = resolved.company;
             }
-            setStep(2, 'done');
-        } else {
-            setStep(2, 'done');
+            parsedData.email = resolved.email;
+            parsedData.email_confidence = resolved.confidence;
+            parsedData.email_reasoning = resolved.reasoning;
         }
+        setStep(2, 'done');
 
         // Show result
         showResult(parsedData, imageBlob);
@@ -796,6 +912,7 @@ els.btnRescan.addEventListener('click', () => {
 els.contactForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    // Build contact, merging form fields with OCR-derived data
     const contact = {
         name: els.fName.value.trim(),
         salutation: els.fSalutation.value.trim(),
@@ -803,8 +920,12 @@ els.contactForm.addEventListener('submit', async (e) => {
         company: els.fCompany.value.trim(),
         email: els.fEmail.value.trim(),
         phone: els.fPhone.value.trim(),
-        conference: getConference(),
         notes: els.fNotes.value.trim(),
+        // Fields from badge OCR (not in the form)
+        credentials: _currentParsed?.credentials || '',
+        specialty: _currentParsed?.specialty || '',
+        city: _currentParsed?.city || '',
+        state: _currentParsed?.state || '',
         captured_at: new Date().toISOString(),
     };
 
@@ -819,6 +940,7 @@ els.contactForm.addEventListener('submit', async (e) => {
 
     // Reset and go back to camera
     currentImage = null;
+    _currentParsed = null;
     els.contactForm.reset();
     showScreen('camera');
     startCamera();
