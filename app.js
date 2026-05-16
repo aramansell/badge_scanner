@@ -627,23 +627,236 @@ Fields to extract:
     return extractJSON(content);
 }
 
+// ── PA Program Database ────────────────────────────
+// Top 63 US PA programs (city, state, email domain, naming convention).
+// Used to short-circuit institution resolution without needing web search.
+const PA_PROGRAM_DB = [
+  { inst: "Duke University", city: "Durham", state: "NC", domain: "duke.edu", fmt: "first.last" },
+  { inst: "University of Iowa", city: "Iowa City", state: "IA", domain: "uiowa.edu", fmt: "first-last" },
+  { inst: "Baylor College of Medicine", city: "Houston", state: "TX", domain: "bcm.edu", fmt: "firstlast" },
+  { inst: "University of Utah", city: "Salt Lake City", state: "UT", domain: "utah.edu", fmt: "first.last" },
+  { inst: "Emory University", city: "Atlanta", state: "GA", domain: "emory.edu", fmt: "first.last" },
+  { inst: "George Washington University", city: "Washington", state: "DC", domain: "gwu.edu", fmt: "firstlast" },
+  { inst: "University of Colorado", city: "Aurora", state: "CO", domain: "cuanschutz.edu", fmt: "first.last" },
+  { inst: "Oregon Health & Science University", city: "Portland", state: "OR", domain: "ohsu.edu", fmt: "firstlast" },
+  { inst: "Wake Forest University", city: "Winston-Salem", state: "NC", domain: "wakehealth.edu", fmt: "firstlast" },
+  { inst: "University of Washington", city: "Seattle", state: "WA", domain: "uw.edu", fmt: "firstlast" },
+  { inst: "University of Texas Southwestern", city: "Dallas", state: "TX", domain: "utsouthwestern.edu", fmt: "first.last" },
+  { inst: "Quinnipiac University", city: "Hamden", state: "CT", domain: "quinnipiac.edu", fmt: "first.last" },
+  { inst: "University of Florida", city: "Gainesville", state: "FL", domain: "ufl.edu", fmt: "firstlast" },
+  { inst: "Rosalind Franklin University", city: "North Chicago", state: "IL", domain: "rosalindfranklin.edu", fmt: "first.last" },
+  { inst: "Drexel University", city: "Philadelphia", state: "PA", domain: "drexel.edu", fmt: "firstlast" },
+  { inst: "Stony Brook University", city: "Stony Brook", state: "NY", domain: "stonybrookmedicine.edu", fmt: "first.last" },
+  { inst: "University of Southern California", city: "Los Angeles", state: "CA", domain: "usc.edu", fmt: "firstlast" },
+  { inst: "University of North Carolina", city: "Chapel Hill", state: "NC", domain: "med.unc.edu", fmt: "first_last" },
+  { inst: "Midwestern University", city: "Downers Grove", state: "IL", domain: "midwestern.edu", fmt: "firstlast" },
+  { inst: "Yale University", city: "New Haven", state: "CT", domain: "yale.edu", fmt: "first.last" },
+  { inst: "Northeastern University", city: "Boston", state: "MA", domain: "northeastern.edu", fmt: "first.last" },
+  { inst: "Rutgers University", city: "Piscataway", state: "NJ", domain: "rutgers.edu", fmt: "first.last" },
+  { inst: "University of Texas Health San Antonio", city: "San Antonio", state: "TX", domain: "uthscsa.edu", fmt: "firstlast" },
+  { inst: "MCPHS University", city: "Boston", state: "MA", domain: "mcphs.edu", fmt: "firstlast" },
+  { inst: "Butler University", city: "Indianapolis", state: "IN", domain: "butler.edu", fmt: "firstlast" },
+  { inst: "University of Kentucky", city: "Lexington", state: "KY", domain: "uky.edu", fmt: "first.last" },
+  { inst: "University of Alabama at Birmingham", city: "Birmingham", state: "AL", domain: "uab.edu", fmt: "firstlast" },
+  { inst: "Stanford University", city: "Stanford", state: "CA", domain: "stanford.edu", fmt: "firstlast" },
+  { inst: "University of South Alabama", city: "Mobile", state: "AL", domain: "southalabama.edu", fmt: "firstlast" },
+  { inst: "Jefferson University", city: "Philadelphia", state: "PA", domain: "jefferson.edu", fmt: "first.last" },
+  { inst: "Ohio State University", city: "Columbus", state: "OH", domain: "osumc.edu", fmt: "first.last" },
+  { inst: "University of Oklahoma", city: "Oklahoma City", state: "OK", domain: "ouhsc.edu", fmt: "first-last" },
+  { inst: "University of Nebraska", city: "Omaha", state: "NE", domain: "unmc.edu", fmt: "firstlast" },
+  { inst: "Northwestern University", city: "Chicago", state: "IL", domain: "northwestern.edu", fmt: "firstlast" },
+  { inst: "Pace University", city: "New York", state: "NY", domain: "pace.edu", fmt: "firstlast" },
+  { inst: "University of Detroit Mercy", city: "Detroit", state: "MI", domain: "udmercy.edu", fmt: "firstlast" },
+  { inst: "University of Pittsburgh", city: "Pittsburgh", state: "PA", domain: "pitt.edu", fmt: "firstlast" },
+  { inst: "University of California, Davis", city: "Sacramento", state: "CA", domain: "ucdavis.edu", fmt: "firstlast" },
+  { inst: "Barry University", city: "Miami", state: "FL", domain: "barry.edu", fmt: "firstlast" },
+  { inst: "Marquette University", city: "Milwaukee", state: "WI", domain: "marquette.edu", fmt: "first.last" },
+  { inst: "Rochester Institute of Technology", city: "Rochester", state: "NY", domain: "rit.edu", fmt: "firstlast" },
+  { inst: "Shenandoah University", city: "Winchester", state: "VA", domain: "su.edu", fmt: "firstlast" },
+  { inst: "Touro University", city: "Vallejo", state: "CA", domain: "touro.edu", fmt: "first.last" },
+  { inst: "University of South Florida", city: "Tampa", state: "FL", domain: "usf.edu", fmt: "firstlast" },
+  { inst: "Arcadia University", city: "Glenside", state: "PA", domain: "arcadia.edu", fmt: "firstlast" },
+  { inst: "Temple University", city: "Philadelphia", state: "PA", domain: "temple.edu", fmt: "first.last" },
+  { inst: "University of Michigan", city: "Ann Arbor", state: "MI", domain: "umich.edu", fmt: "firstlast" },
+  { inst: "Medical University of South Carolina", city: "Charleston", state: "SC", domain: "musc.edu", fmt: "firstlast" },
+  { inst: "Baylor University", city: "Waco", state: "TX", domain: "baylor.edu", fmt: "first_last" },
+  { inst: "University of Wisconsin", city: "Madison", state: "WI", domain: "wisc.edu", fmt: "first.last" },
+  { inst: "Cornell University", city: "New York", state: "NY", domain: "med.cornell.edu", fmt: "firstlast" },
+  { inst: "Case Western Reserve University", city: "Cleveland", state: "OH", domain: "case.edu", fmt: "firstlast" },
+  { inst: "University of New Mexico", city: "Albuquerque", state: "NM", domain: "unm.edu", fmt: "firstlast" },
+  { inst: "Idaho State University", city: "Pocatello", state: "ID", domain: "isu.edu", fmt: "firstlast" },
+  { inst: "University of North Dakota", city: "Grand Forks", state: "ND", domain: "und.edu", fmt: "first.last" },
+  { inst: "A.T. Still University", city: "Mesa", state: "AZ", domain: "atsu.edu", fmt: "firstlast" },
+  { inst: "Midwestern University", city: "Glendale", state: "AZ", domain: "midwestern.edu", fmt: "firstlast" },
+  { inst: "University of Tennessee", city: "Memphis", state: "TN", domain: "uthsc.edu", fmt: "firstlast" },
+  { inst: "Louisiana State University", city: "New Orleans", state: "LA", domain: "lsuhsc.edu", fmt: "firstlast" },
+  { inst: "University of Missouri", city: "Columbia", state: "MO", domain: "missouri.edu", fmt: "firstlast" },
+  { inst: "Indiana University", city: "Indianapolis", state: "IN", domain: "iu.edu", fmt: "firstlast" },
+  { inst: "Methodist University", city: "Fayetteville", state: "NC", domain: "methodist.edu", fmt: "first.last" },
+  { inst: "Penn State University", city: "Hershey", state: "PA", domain: "psu.edu", fmt: "firstlast" },
+];
+
 // ── OpenAI: Institution resolver + email lookup ────
-// When company is on the badge, uses it directly. When not, searches for
-// teaching hospitals / universities with PA programs in the given city+state
-// and matches the person.
+// TWO BRANCHES:
+//   Branch 1: Company IS on badge → local lookup (match domain, construct email)
+//   Branch 2: No company → search local PA program DB by city+state
+// GPT fallback only when local DB can't match (rare).
+
 async function resolveInstitution(parsed) {
     const { name, company, title, credentials, specialty, city, state } = parsed;
 
-    // Branch 1: company is known — straightforward email lookup
+    // Branch 1: company is known — match domain locally
     if (company) {
-        return lookupEmailSimple(name, company);
+        return resolveLocally(name, company);
     }
 
-    // Branch 2: no company — must resolve institution from city+state+specialty
+    // Branch 2: no company — search local DB by city+state
+    if (city && state) {
+        const match = PA_PROGRAM_DB.find(p =>
+            p.city.toLowerCase() === city.toLowerCase() &&
+            p.state.toUpperCase() === state.toUpperCase()
+        );
+        if (match) {
+            return {
+                company: match.inst,
+                email: constructEmail(name, match.domain, match.fmt),
+                confidence: 'medium',
+                reasoning: `Matched ${match.inst} from local PA program database (${city}, ${state})`
+            };
+        }
+
+        // Broader: match just by state
+        const stateMatch = PA_PROGRAM_DB.find(p =>
+            p.state.toUpperCase() === state.toUpperCase()
+        );
+        if (stateMatch) {
+            return {
+                company: stateMatch.inst,
+                email: constructEmail(name, stateMatch.domain, stateMatch.fmt),
+                confidence: 'low',
+                reasoning: `Matched ${stateMatch.inst} by state (${state}) — no exact city match for ${city}`
+            };
+        }
+    }
+
+    // Nothing in local DB — fall back to GPT with web_search
+    return resolveWithGPT(name, company, title, credentials, specialty, city, state);
+}
+
+// ── Local resolver (no API call) ──────────────────
+
+async function resolveLocally(name, company) {
+    // Try to match the company to a known domain in the DB
+    const lc = company.toLowerCase();
+    const match = PA_PROGRAM_DB.find(p =>
+        lc.includes(p.domain.replace('.edu', '').replace('.com', '')) ||
+        lc.includes(p.inst.toLowerCase().substring(0, 8))
+    );
+
+    if (match) {
+        return {
+            company: company,
+            email: constructEmail(name, match.domain, match.fmt),
+            confidence: 'medium',
+            reasoning: `Company "${company}" matched to ${match.inst} domain ${match.domain}`
+        };
+    }
+
+    // Extract domain from company name (best-effort heuristic)
+    const domainGuess = guessDomain(company);
+    if (domainGuess) {
+        return {
+            company: company,
+            email: constructEmail(name, domainGuess, 'first.last'),
+            confidence: 'low',
+            reasoning: `Guessed domain ${domainGuess} from company name "${company}"`
+        };
+    }
+
+    // Nothing local works — fall back to GPT
+    return resolveWithGPT(name, company, null, null, null, null, null);
+}
+
+function guessDomain(company) {
+    const lc = company.toLowerCase().replace(/[^a-z0-9 ]/g, '');
+    const words = lc.split(/\s+/);
+
+    // Common mappings
+    const known = {
+        'mayo clinic': 'mayo.edu',
+        'cleveland clinic': 'ccf.org',
+        'johns hopkins': 'jhmi.edu',
+        'kaiser permanente': 'kp.org',
+        'mass general brigham': 'mgb.org',
+        'mass general': 'mgh.harvard.edu',
+        'brigham and womens': 'bwh.harvard.edu',
+        'brigham': 'bwh.harvard.edu',
+        'cedars sinai': 'cshs.org',
+        'nyu': 'nyulangone.org',
+        'nyu langone': 'nyulangone.org',
+        'mount sinai': 'mountsinai.org',
+        'ucla': 'mednet.ucla.edu',
+        'ucsf': 'ucsf.edu',
+        'ucsd': 'health.ucsd.edu',
+        'md anderson': 'mdanderson.org',
+        'md anderson': 'mdanderson.org',
+        'upenn': 'pennmedicine.upenn.edu',
+        'penn medicine': 'pennmedicine.upenn.edu',
+    };
+
+    // Check for exact match in known
+    for (const [k, v] of Object.entries(known)) {
+        if (lc === k || lc.includes(k)) return v;
+    }
+
+    // If it's a single recognizable word + health/hospital/medical
+    if (words.length <= 2) return null;
+
+    return null;
+}
+
+function constructEmail(name, domain, fmt) {
+    if (!name || !domain) return '';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length < 2) return '';
+
+    const first = parts[0].toLowerCase().replace(/[^a-z]/g, '');
+    const last = parts[parts.length - 1].toLowerCase().replace(/[^a-z]/g, '');
+
+    switch (fmt) {
+        case 'first.last': return `${first}.${last}@${domain}`;
+        case 'first_last': return `${first}_${last}@${domain}`;
+        case 'first-last': return `${first}-${last}@${domain}`;
+        case 'firstlast':  return `${first}${last}@${domain}`;
+        default:           return `${first}.${last}@${domain}`;
+    }
+}
+
+// ── GPT fallback (only when local DB misses) ───────
+
+async function resolveWithGPT(name, company, title, credentials, specialty, city, state) {
     const location = city && state ? `${city}, ${state}` : (city || state || 'unknown location');
     const spec = specialty || 'unknown specialty';
     const creds = credentials || 'PA';
     const role = title || '';
+
+    // Precompute the branching instruction parts (avoid nested template literals)
+    const companyLine = company ? `Company: ${company}` : '';
+    let step1;
+    if (company) {
+        step1 = `The badge company is "${company}". Use web_search to find this person's email at that company.`;
+    } else {
+        step1 = `This person works in ${location}. Find teaching hospitals and medical universities in ${location} that have a PA program (Physician Assistant program). This is a PA conference — the person almost certainly works at an institution that trains PAs or employs PAs in a teaching hospital setting.
+
+  Use web_search. Search queries to try:
+  - "${location} teaching hospital PA program"
+  - "${location} medical university physician assistant program"
+  - "${location} academic medical center"
+  - "${name} ${location}"
+
+  Narrow to the 1-2 most likely institutions.`;
+    }
+    const inputText = `Resolve the employer and email for ${name} (${creds}) who practices ${spec} in ${location}.${company ? ' Badge company: ' + company + '.' : ''}`;
 
     const instructions = `You are a medical conference lead-capture assistant.
 Your job: given a person at the AAPA 2026 conference, find their employer and email.
@@ -654,46 +867,24 @@ PERSON DETAILS:
   Title/Role: ${role || 'not listed'}
   Specialty: ${spec}
   Location (from badge): ${location}
+  ${companyLine}
 
 CRITICAL — WHAT TO DO:
 
 Step 1: Identify the most likely employer.
-  This person works in ${location}. Find teaching hospitals and medical universities
-  in ${location} that have a PA program (Physician Assistant program).
-  This is a PA conference — the person almost certainly works at an institution
-  that trains PAs or employs PAs in a teaching hospital setting.
-
-  Use web_search. Search queries to try:
-  - "${location} teaching hospital PA program"
-  - "${location} medical university physician assistant program"
-  - "${location} academic medical center"
-  - "${name} ${location}"
-
-  Narrow to the 1-2 most likely institutions based on the person's specialty
-  (${spec}) and the fact they're at AAPA.
+  ${step1}
 
 Step 2: Match the person to that institution.
-  Search for "${name}" at the institution you identified. Try:
-  - "${name}" combined with the institution name
-  - "${name} PA" or "${name} ${creds}" combined with the institution name
-  - "${name} ${location}"
+  Search for "${name}" at the institution you identified.
 
 Step 3: Find their email.
-  Same approach — look for public listings, directory pages, or determine
-  the institution's email format and construct the best guess.
-  If you find the institution's standard email format (e.g. first.last@ohsu.edu),
-  apply it. If you find the person on a directory page, use that email directly.
+  Look for public listings, directory pages, or determine the institution's email format and construct the best guess.
 
 IMPORTANT RULES:
 - Only consider teaching hospitals and medical schools/universities WITH a PA program.
-- If ${location} is Portland, OR — OHSU is a major teaching hospital there. Duke in
-  Durham, NC. UCSF in San Francisco. Use your web_search to find the right one.
 - Do NOT pick random clinics, private practices, or non-teaching hospitals.
-- If you cannot find a match, pick the most likely teaching hospital in
-  ${location} and guess the email using its naming convention.
 - You MUST search the web. Do not guess without searching.
-- NEVER use placeholder text like "institution.edu" — always produce a real domain
-  from your web search results.
+- NEVER use placeholder text like "institution.edu" — always produce a real domain from your web search results.
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
@@ -717,72 +908,12 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
                     type: 'message',
                     role: 'user',
                     content: [
-                        { type: 'input_text', text: `Resolve the employer and email for ${name} (${creds}) who practices ${spec} in ${location}.` },
+                        { type: 'input_text', text: inputText },
                     ],
                 },
             ],
             tools: [{ type: 'web_search' }],
             max_output_tokens: 800,
-        }),
-    });
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `API error (${response.status})`);
-    }
-
-    const data = await response.json();
-    const content = getResponseText(data);
-    return extractJSON(content);
-}
-
-// ── Simple email lookup (when company is already known) ──
-async function lookupEmailSimple(name, company) {
-    const instructions = `You are an email lookup assistant for a conference contact app.
-Given a person's name and company, find their work email address.
-
-IMPORTANT: You MUST use the web_search tool to search for this person's email.
-Search queries to try (in order):
-1. "${name} ${company} email" — find their actual email if publicly listed
-2. "${company} email format" — determine the company's email naming convention
-3. "${company} ${name} linkedin" — find their LinkedIn for title/email hints
-
-After searching, synthesize what you find into the best email guess.
-If you found an actual email, use it. If not, use the company's naming pattern.
-NEVER use placeholder values — always provide a real email guess.
-
-Common patterns to consider: first@company.com, first.last@company.com,
-firstinitiallast@company.com, first_last@company.com.
-
-Also provide a confidence level and one-sentence reasoning about what you found.
-
-Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
-{
-  "email": "actual_email_guess@company.com",
-  "confidence": "high|medium|low",
-  "reasoning": "One sentence explaining what you found from web search"
-}`;
-
-    const response = await fetch('https://api.openai.com/v1/responses', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getApiKey()}`,
-        },
-        body: JSON.stringify({
-            model: 'gpt-5.5',
-            instructions: instructions,
-            input: [
-                {
-                    type: 'message',
-                    role: 'user',
-                    content: [
-                        { type: 'input_text', text: `Name: ${name}\nCompany: ${company}\n\nSearch the web and find the most likely work email for this person.` },
-                    ],
-                },
-            ],
-            tools: [{ type: 'web_search' }],
-            max_output_tokens: 600,
         }),
     });
 
