@@ -673,9 +673,9 @@ Step 1: Identify the most likely employer.
   (${spec}) and the fact they're at AAPA.
 
 Step 2: Match the person to that institution.
-  Search for "${name}" at that institution. Try:
-  - "${name} ${institution}"
-  - "${name} ${creds} ${institution}"
+  Search for "${name}" at the institution you identified. Try:
+  - "${name}" + the institution name
+  - "${name} ${creds}" + the institution name
   - "${name} ${specialty} ${city}"
 
 Step 3: Find their email.
