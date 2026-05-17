@@ -39,6 +39,7 @@ const els = {
     fState: $('#f-state'),
     fTitle: $('#f-title'),
     fCompany: $('#f-company'),
+    fCompanySelect: $('#f-company-select'),
     fEmail: $('#f-email'),
     fPhone: $('#f-phone'),
     fNotes: $('#f-notes'),
@@ -616,22 +617,32 @@ function localDbLookup(parsed) {
     const state = (parsed.state || els.fState.value).trim().toLowerCase();
     const company = (parsed.company || els.fCompany.value).trim().toLowerCase();
 
-    // If we have an explicitly stated company on the badge, check if it's in our DB
-    if (company) {
-        const match = LOCAL_DB.find(db => company.includes(db.inst.toLowerCase()));
-        if (match) return [match];
-    }
-
-    if (!city || !state) return [];
-
-    // Find all institutions in that city+state
-    let candidates = LOCAL_DB.filter(db => 
-        db.city.toLowerCase() === city && 
-        db.state.toLowerCase() === state
-    );
+    let candidates = [];
     
-    // Sort by weight descending (default to 0 if no weight)
-    candidates.sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    if (city && state) {
+        candidates = LOCAL_DB.filter(db => 
+            db.city.toLowerCase() === city && 
+            db.state.toLowerCase() === state
+        );
+    }
+    
+    // Check if we can find the company directly
+    let directMatch = null;
+    if (company) {
+        directMatch = LOCAL_DB.find(db => company.includes(db.inst.toLowerCase()) || db.inst.toLowerCase().includes(company));
+        if (directMatch && !candidates.find(c => c.inst === directMatch.inst)) {
+            candidates.push(directMatch);
+        }
+    }
+    
+    // Sort by weight descending, giving priority to direct match
+    candidates.sort((a, b) => {
+        if (directMatch) {
+            if (a.inst === directMatch.inst) return -1;
+            if (b.inst === directMatch.inst) return 1;
+        }
+        return (b.weight || 0) - (a.weight || 0);
+    });
     
     return candidates;
 }
@@ -1137,7 +1148,40 @@ function showResult(parsed, imageBlob) {
     if (!els.fCity.value) els.fCity.value = parsed.city || '';
     if (!els.fState.value) els.fState.value = parsed.state || '';
     if (!els.fTitle.value) els.fTitle.value = parsed.title || '';
-    if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
+    
+    // Company dropdown logic
+    const candidates = localDbLookup(parsed);
+    if (candidates.length > 0) {
+        els.fCompany.style.display = 'none';
+        els.fCompanySelect.style.display = 'block';
+        els.fCompanySelect.innerHTML = '';
+        candidates.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.inst;
+            opt.textContent = c.inst;
+            els.fCompanySelect.appendChild(opt);
+        });
+        const otherOpt = document.createElement('option');
+        otherOpt.value = 'Other';
+        otherOpt.textContent = 'Other (Type manually)';
+        els.fCompanySelect.appendChild(otherOpt);
+        
+        let bestMatch = null;
+        if (parsed.company) {
+            const lowerCompany = parsed.company.toLowerCase();
+            bestMatch = candidates.find(c => lowerCompany.includes(c.inst.toLowerCase()) || c.inst.toLowerCase().includes(lowerCompany));
+        }
+        
+        els.fCompanySelect.value = bestMatch ? bestMatch.inst : candidates[0].inst;
+        if (!els.fCompanySelect.value) els.fCompanySelect.value = candidates[0].inst;
+        
+        if (!els.fCompany.value) els.fCompany.value = els.fCompanySelect.value;
+    } else {
+        els.fCompanySelect.style.display = 'none';
+        els.fCompany.style.display = 'block';
+        if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
+    }
+
     if (!els.fEmail.value) els.fEmail.value = parsed.email || '';
     if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
 
@@ -1219,8 +1263,12 @@ async function processImage(imageBlob) {
                 
                 if (best.fmt === 'firstlast') emailGuess = `${f}${l}@${best.domain}`;
                 else if (best.fmt === 'first.last') emailGuess = `${f}.${l}@${best.domain}`;
+                else if (best.fmt === 'last.first') emailGuess = `${l}.${f}@${best.domain}`;
                 else if (best.fmt === 'flast') emailGuess = `${fi}${l}@${best.domain}`;
+                else if (best.fmt === 'f.last') emailGuess = `${fi}.${l}@${best.domain}`;
                 else if (best.fmt === 'lastf') emailGuess = `${l}${fi}@${best.domain}`;
+                else if (best.fmt === 'firstl') emailGuess = `${f}${l.charAt(0)}@${best.domain}`;
+                else if (best.fmt === 'first.l') emailGuess = `${f}.${l.charAt(0)}@${best.domain}`;
             }
             if (!parsedData.email) parsedData.email = emailGuess;
             
@@ -1357,6 +1405,45 @@ els.btnSaveKey.addEventListener('click', () => {
     setWebhook(webhook);
     els.apiKeyModal.classList.remove('active');
     toast('Settings saved');
+});
+
+// ── Company Select Change Listener ──────────────
+els.fCompanySelect.addEventListener('change', (e) => {
+    if (e.target.value === 'Other') {
+        els.fCompanySelect.style.display = 'none';
+        els.fCompany.style.display = 'block';
+        els.fCompany.value = '';
+        els.fCompany.focus();
+    } else {
+        els.fCompany.value = e.target.value;
+        // Update email guess
+        if (typeof LOCAL_DB !== 'undefined') {
+            const match = LOCAL_DB.find(db => db.inst === e.target.value);
+            if (match) {
+                let emailGuess = '';
+                const names = (els.fName.value).split(' ');
+                if (names.length >= 2 && match.domain) {
+                    const f = names[0].toLowerCase();
+                    const l = names[names.length - 1].toLowerCase();
+                    const fi = f.charAt(0);
+                    
+                    if (match.fmt === 'firstlast') emailGuess = `${f}${l}@${match.domain}`;
+                    else if (match.fmt === 'first.last') emailGuess = `${f}.${l}@${match.domain}`;
+                    else if (match.fmt === 'last.first') emailGuess = `${l}.${f}@${match.domain}`;
+                    else if (match.fmt === 'flast') emailGuess = `${fi}${l}@${match.domain}`;
+                    else if (match.fmt === 'f.last') emailGuess = `${fi}.${l}@${match.domain}`;
+                    else if (match.fmt === 'lastf') emailGuess = `${l}${fi}@${match.domain}`;
+                    else if (match.fmt === 'firstl') emailGuess = `${f}${l.charAt(0)}@${match.domain}`;
+                    else if (match.fmt === 'first.l') emailGuess = `${f}.${l.charAt(0)}@${match.domain}`;
+                }
+                if (emailGuess) {
+                    els.fEmail.value = emailGuess;
+                    els.emailConf.textContent = 'Auto-generated from database based on selected company.';
+                    els.emailConf.className = 'email-confidence uncertain';
+                }
+            }
+        }
+    }
 });
 
 // ── Init ──────────────────────────────────────────

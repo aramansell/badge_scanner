@@ -34,7 +34,7 @@
         <div class="actions">
             <button class="btn btn-primary btn-full" id="btn-capture" disabled>📸 Capture Badge</button>
             <label for="input-file" class="btn btn-ghost btn-full" id="btn-file" style="display: flex; justify-content: center; align-items: center; cursor: pointer;">🖼 Upload Photo</label>
-            <input type="file" id="input-file" accept="image/png, image/jpeg, image/heic, image/*" style="display:none">
+            <input type="file" id="input-file" style="display:none">
         </div>
 
         <div class="preview-wrap hidden" id="preview-wrap" style="display:none; margin-top: 16px;">
@@ -72,7 +72,10 @@
 
             <div class="form-group">
                 <label>Company</label>
-                <input id="f-company" type="text" placeholder="Company / Organization">
+                <div style="display: flex; gap: 8px;">
+                    <select id="f-company-select" style="display:none; flex: 1; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: #fff;"></select>
+                    <input id="f-company" type="text" placeholder="Company / Organization" style="flex: 1;">
+                </div>
             </div>
 
             <div class="form-group">
