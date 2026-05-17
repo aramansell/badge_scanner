@@ -1,0 +1,11 @@
+<form id="f">
+    <select id="s"><option value="1">1</option><option value="2">2</option></select>
+</form>
+<script>
+    document.getElementById('f').addEventListener('input', () => console.log('input'));
+    document.getElementById('f').addEventListener('change', () => console.log('change'));
+    // trigger change
+    const s = document.getElementById('s');
+    s.value = "2";
+    s.dispatchEvent(new Event('change', {bubbles:true}));
+</script>

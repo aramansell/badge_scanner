@@ -139,7 +139,8 @@ async function compressImage(blob, maxDim = 1080) {
     return new Promise(resolve => cvs.toBlob(resolve, 'image/jpeg', 0.8));
 }
 
-async function storeContact(contact, imageBlob) {
+async function storeContact(contact, imageBlob, opts = {}) {
+    const { skipWebhook = false } = opts;
     const id = contact.id || crypto.randomUUID();
     contact.id = id;
 
@@ -151,18 +152,20 @@ async function storeContact(contact, imageBlob) {
         await _writeBlob(dir, 'badge.jpg', compressedBlob);
     }
 
-    const webhookUrl = getWebhook();
-    if (webhookUrl) {
-        try {
-            await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(contact),
-                mode: 'no-cors'
-            });
-            console.log("Webhook triggered");
-        } catch (e) {
-            console.error("Webhook failed", e);
+    if (!skipWebhook) {
+        const webhookUrl = getWebhook();
+        if (webhookUrl) {
+            try {
+                await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(contact),
+                    mode: 'no-cors'
+                });
+                console.log("Webhook triggered");
+            } catch (e) {
+                console.error("Webhook failed", e);
+            }
         }
     }
 
@@ -1321,11 +1324,118 @@ els.btnRescan.addEventListener('click', () => {
     startCamera();
 });
 
+// ── Background verification: runs after save returns to camera ──
+async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
+    // Wait a tick so the save toast appears first
+    await new Promise(r => setTimeout(r, 300));
+
+    let verified = null;
+    try {
+        verified = await resolveInstitution({
+            name: contact.name,
+            company: contact.company,
+            title: contact.title,
+            credentials: contact.credentials,
+            specialty: contact.specialty,
+            city: contact.city,
+            state: contact.state
+        });
+    } catch (err) {
+        console.error('Background verification failed:', err);
+    }
+
+    // Check the contact still exists (user may have cleared all)
+    const existing = _contactsCache.find(c => c.id === contactId);
+    if (!existing) {
+        console.log(`Contact ${contactId} deleted before verification completed, skipping.`);
+        return;
+    }
+
+    // ── Build comprehensive notes ─────────────────
+    const notesParts = [];
+
+    // Original user notes (strip out the pending tag we appended)
+    if (contact.notes) {
+        const clean = contact.notes.replace(/\n?\[Verification pending[^\]]*\]/, '').trim();
+        if (clean) notesParts.push(clean);
+    }
+
+    // What was selected on the form
+    if (contact.company) {
+        notesParts.push(`Company selected: ${contact.company}`);
+    } else {
+        notesParts.push('Company: (none selected)');
+    }
+
+    // Badge OCR context
+    const badgeParts = [];
+    if (contact.credentials) badgeParts.push(contact.credentials);
+    if (contact.specialty) badgeParts.push(contact.specialty);
+    if (contact.city && contact.state) badgeParts.push(`${contact.city}, ${contact.state}`);
+    if (badgeParts.length) {
+        notesParts.push(`Badge info: ${badgeParts.join(' — ')}`);
+    }
+
+    // Was the form edited by the user before save?
+    if (wasEdited) {
+        notesParts.push('(Form fields were manually adjusted before save)');
+    }
+
+    if (verified) {
+        notesParts.push(`[AI Verified — ${verified.confidence || 'unknown'} confidence]: ${verified.reasoning || ''}`);
+
+        if (verified.company && verified.company.toLowerCase() !== contact.company.toLowerCase()) {
+            notesParts.push(`Company corrected: "${contact.company}" → "${verified.company}"`);
+        }
+        if (verified.email && verified.email.toLowerCase() !== (contact.email || '').toLowerCase()) {
+            notesParts.push(`Email updated: "${contact.email || 'none'}" → "${verified.email}"`);
+        }
+    } else {
+        notesParts.push('[AI verification failed — email is best-guess, not confirmed]');
+    }
+
+    // ── Update the contact in place ────────────────
+    const v2Contact = {
+        id: contactId,
+        name: contact.name,
+        salutation: contact.salutation,
+        city: contact.city,
+        state: contact.state,
+        title: contact.title,
+        phone: contact.phone,
+        credentials: contact.credentials,
+        specialty: contact.specialty,
+        captured_at: contact.captured_at,
+        company: verified?.company || contact.company,
+        email: verified?.email || contact.email,
+        notes: notesParts.join('\n\n'),
+        version: 2,
+        edited: wasEdited,
+        enriched: true,
+        original_version: null,
+    };
+
+    // Re-save to OPFS (same ID, overwrites) — this time fire the webhook
+    await storeContact(v2Contact, null); // null image, skipWebhook defaults to false
+
+    // Update in-memory cache
+    const idx = _contactsCache.findIndex(c => c.id === contactId);
+    if (idx >= 0) {
+        _contactsCache[idx] = v2Contact;
+    }
+
+    // Keep index in sync
+    await _saveIndex();
+    updateCounter();
+
+    toast(`✓ Verified: ${contact.name}`);
+}
+
 // ── Event: Save contact ───────────────────────────
 els.contactForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    // Build contact, merging form fields with OCR-derived data
+    // Build contact from form fields
     const contact = {
         name: els.fName.value.trim(),
         salutation: els.fSalutation.value.trim(),
@@ -1336,16 +1446,9 @@ els.contactForm.addEventListener('submit', async (e) => {
         email: els.fEmail.value.trim(),
         phone: els.fPhone.value.trim(),
         notes: els.fNotes.value.trim(),
-        // Fields from badge OCR (not in the form)
         credentials: _currentParsed?.credentials || '',
         specialty: _currentParsed?.specialty || '',
         captured_at: new Date().toISOString(),
-        
-        // Phase 2 architecture metadata
-        version: 1,
-        edited: _formEdited,
-        enriched: false,
-        original_version: null
     };
 
     if (!contact.name) {
@@ -1353,17 +1456,24 @@ els.contactForm.addEventListener('submit', async (e) => {
         return;
     }
 
-    // Store contact + badge image in OPFS
-    const id = await storeContact(contact, currentImage || null);
-    contact.id = id;
-    toast(`Saved: ${contact.name}`);
+    // ── Save v2 immediately (best-guess, not verified yet) ──
+    const v2Contact = {
+        ...contact,
+        version: 2,
+        enriched: false,             // false until verification completes
+        edited: _formEdited,
+        original_version: null,
+        // Append pending note
+        notes: (contact.notes ? contact.notes + '\n\n' : '')
+            + `[Verification pending — running background check on "${contact.company}"]`,
+    };
 
-    // If human didn't edit it (aside from maybe pre-filling, but we tracked any input as edit), queue for background enrichment
-    if (!contact.edited) {
-        enqueueForEnrichment(contact);
-    }
+    const id = await storeContact(v2Contact, currentImage || null, { skipWebhook: true });
+    v2Contact.id = id;
+    toast(`Saved: ${contact.name} (verifying…)`);
 
-    // Reset and go back to camera
+    // ── Return to camera immediately ───────────────
+    const savedImage = currentImage;
     currentImage = null;
     _currentParsed = null;
     _formEdited = false;
@@ -1371,6 +1481,9 @@ els.contactForm.addEventListener('submit', async (e) => {
     els.emailConf.textContent = '';
     showScreen('camera');
     startCamera();
+
+    // ── Background: verify via web search, update in place ──
+    _verifyInBackground(id, contact, savedImage, _formEdited);
 });
 
 // ── Event: Export Zip ──────────────────────────────
