@@ -53,18 +53,8 @@ let _currentParsed = null;  // parsed badge data from OCR, merged on save
 let _formEdited = false; // track if human edited before save
 
 // ── Local Database Mock ───────────────────────────
-const LOCAL_DB = [
-    { inst: "OHSU", city: "Portland", state: "OR", domain: "ohsu.edu", fmt: "lastf", type: "hospital" },
-    { inst: "Pacific University", city: "Portland", state: "OR", domain: "pacificu.edu", fmt: "flast", type: "program" },
-    { inst: "Legacy Health", city: "Portland", state: "OR", domain: "lhs.org", fmt: "flast", type: "hospital" },
-    { inst: "Providence Portland", city: "Portland", state: "OR", domain: "providence.org", fmt: "first.last", type: "hospital" },
-    { inst: "Duke University", city: "Durham", state: "NC", domain: "duke.edu", fmt: "first.last", type: "program" },
-    { inst: "UNC Health", city: "Chapel Hill", state: "NC", domain: "unchealth.unc.edu", fmt: "first.last", type: "hospital" },
-    { inst: "UCSF", city: "San Francisco", state: "CA", domain: "ucsf.edu", fmt: "first.last", type: "program" },
-    { inst: "Kaiser Permanente", city: "San Francisco", state: "CA", domain: "kp.org", fmt: "first.last", type: "hospital" },
-    { inst: "University of Washington", city: "Seattle", state: "WA", domain: "uw.edu", fmt: "flast", type: "program" },
-    { inst: "Swedish Medical Center", city: "Seattle", state: "WA", domain: "swedish.org", fmt: "first.last", type: "hospital" }
-];
+// LOCAL_DB is now provided globally via db.js
+
 
 // ── Contact Store (OPFS) ──────────────────────────
 // All contacts + badge images live in OPFS:
@@ -1218,7 +1208,6 @@ els.btnCapture.addEventListener('click', async () => {
 });
 
 // ── Event: File upload ────────────────────────────
-els.btnFile.addEventListener('click', () => els.inputFile.click());
 
 els.inputFile.addEventListener('change', () => {
     const file = els.inputFile.files[0];

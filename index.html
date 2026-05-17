@@ -33,8 +33,8 @@
 
         <div class="actions">
             <button class="btn btn-primary btn-full" id="btn-capture" disabled>📸 Capture Badge</button>
-            <button class="btn btn-ghost btn-full" id="btn-file">🖼 Upload Photo</button>
-            <input type="file" id="input-file" accept="image/*" style="display:none">
+            <label for="input-file" class="btn btn-ghost btn-full" id="btn-file" style="display: flex; justify-content: center; align-items: center; cursor: pointer;">🖼 Upload Photo</label>
+            <input type="file" id="input-file" accept="image/png, image/jpeg, image/heic, image/*" style="display:none">
         </div>
 
         <div class="preview-wrap hidden" id="preview-wrap" style="display:none; margin-top: 16px;">
@@ -150,6 +150,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="db.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
