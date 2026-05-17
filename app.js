@@ -354,12 +354,30 @@ async function exportZip() {
         }
     }
 
-    // 3. Generate and download
+    // 3. Generate and export
     const blob = await zip.generateAsync({ type: 'blob' });
+    const fileName = `badgescan-export-${new Date().toISOString().slice(0, 10)}.zip`;
+    const file = new File([blob], fileName, { type: 'application/zip' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+            await navigator.share({
+                files: [file],
+                title: 'Exported Contacts',
+                text: 'Contacts from Badge Scanner'
+            });
+            toast('Export completed!');
+            return;
+        } catch (err) {
+            console.error('Share failed or was canceled:', err);
+        }
+    }
+
+    // Fallback: traditional download
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `badgescan-export-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.download = fileName;
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
@@ -607,10 +625,13 @@ function localDbLookup(parsed) {
     if (!city || !state) return [];
 
     // Find all institutions in that city+state
-    const candidates = LOCAL_DB.filter(db => 
+    let candidates = LOCAL_DB.filter(db => 
         db.city.toLowerCase() === city && 
         db.state.toLowerCase() === state
     );
+    
+    // Sort by weight descending (default to 0 if no weight)
+    candidates.sort((a, b) => (b.weight || 0) - (a.weight || 0));
     
     return candidates;
 }
@@ -864,13 +885,12 @@ PERSON DETAILS:
   Title/Role: ${role || 'not listed'}
   Specialty: ${spec}
   Location (from badge): ${location}
-  ${company ? `Current Employer Guess: ${company} (WARNING: This might be incorrect!)` : ''}
 
 CRITICAL — WHAT TO DO:
 
 Step 1: Identify the actual employer.
   I am looking for ${name} who is a PA in ${location}. You have to keep looking until you find this specific person and figure out where their actual place of employment is.
-  ${company ? `You might see "${company}" as a guess, but you MUST keep looking until you verify where their actual place of employment is. Do NOT blindly trust the guess.` : `Search for teaching hospitals and medical universities in ${location} that have a PA program.`}
+  Search for teaching hospitals and medical universities in ${location} that have a PA program. DO NOT assume they work at the most obvious hospital; verify it.
 
   Use web_search. Search queries to try:
   - "${name} ${location} PA"
