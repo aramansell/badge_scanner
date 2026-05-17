@@ -891,43 +891,49 @@ async function resolveInstitution(parsed) {
     const role = title || '';
 
     const instructions = `You are a medical conference lead-capture assistant.
-Your job: given a person at the AAPA 2026 conference, find their VERIFIED employer and email.
+Your job: a salesperson at the AAPA 2026 conference scanned a badge and manually picked an employer from a dropdown. Your job is to VERIFY whether their selection is correct — and if it's wrong, find the REAL employer and email.
 
-PERSON DETAILS:
+WHAT THE SALESPERSON SELECTED:
+  Company: "${company}"
+  Email guess: (auto-generated from company domain)
+
+BADGE DETAILS:
   Name: ${name}
   Credentials: ${creds}
   Title/Role: ${role || 'not listed'}
   Specialty: ${spec}
   Location (from badge): ${location}
 
-CRITICAL — WHAT TO DO:
+CRITICAL — YOUR MISSION:
+The salesperson may have picked the WRONG employer. DO NOT trust their selection. You MUST independently find this person and determine where they ACTUALLY work. Then compare against what was selected.
 
-Step 1: Identify the actual employer.
-  I am looking for ${name} who is a PA in ${location}. You have to keep looking until you find this specific person and figure out where their actual place of employment is.
-  Search for teaching hospitals and medical universities in ${location} that have a PA program. DO NOT assume they work at the most obvious hospital; verify it.
+MANDATORY — YOU MUST USE web_search. Do NOT guess. Do NOT return without searching. Search at least 3 different queries:
 
-  Use web_search. Search queries to try:
-  - "${name} ${location} PA"
-  - "${name} ${creds} ${location}"
-  - "${name} LinkedIn ${location}"
-  - "${location} teaching hospital PA program"
+1. "${name} ${location} PA" — to find the person
+2. "${name} ${creds} LinkedIn" — to find their LinkedIn profile
+3. "${name} ${location} ${creds}" — broader search
 
-Step 2: Match the person to the institution.
-  Once you find the person, identify their current employer. Verify it by finding a real webpage, directory, or LinkedIn profile for them.
+IF YOU CANNOT FIND THE PERSON AT ALL (no LinkedIn, no directory, no profiles):
+- Set confidence to "low"
+- Return the best-guess employer based on their badge location and specialty
+- Construct an email using the employer's domain and standard format
+- In reasoning, say "Could not locate person online — using location-based best guess"
 
-Step 3: Find their email.
-  Look for public listings, directory pages, or determine the institution's email format and construct the best guess.
-  If you find the institution's standard email format (e.g. first.last@ohsu.edu), apply it. If you find the person on a directory page, use that email directly.
+IF YOU FIND THE PERSON and their employer DIFFERS from what the salesperson selected:
+- Set confidence to "high" if you found solid evidence (LinkedIn, hospital directory, Doximity, etc.)
+- Return the REAL employer and email
+- In reasoning, say "Found on [source] — correct employer is [X], salesperson selected [Y]"
 
-CRITICAL — THE EMAIL FIELD MUST ALWAYS BE A REAL EMAIL ADDRESS.
-Even if you cannot find the person online, you MUST construct a reasonable guess using the employer's domain and standard format. Never return placeholder text, example text, or instructions. The value must pass a basic email regex check (contains an @ sign and a domain with a dot).
+IF YOU FIND THE PERSON and their employer MATCHES what the salesperson selected:
+- Set confidence to "high" if evidence is solid, "medium" if only circumstantial
+- In reasoning, say "Verified on [source] — employer matches salesperson selection"
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "company": "Actual employer name or the best guess city+state hospital system",
-  "email": "example.person@hospital.edu",
+  "company": "Verified employer name OR best-guess hospital system",
+  "email": "person.name@employer.edu",
   "confidence": "high|medium|low",
-  "reasoning": "One sentence explaining how you verified their employer and derived the email"
+  "reasoning": "Where you found them (e.g. LinkedIn, hospital directory) and whether it matched the salesperson's selection"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -960,7 +966,13 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
 
     const data = await response.json();
     const content = getResponseText(data);
-    return extractJSON(content);
+    const result = extractJSON(content);
+    console.log('🔍 resolveInstitution result:', JSON.stringify({
+        input: { name, company, location },
+        output: result,
+        rawContent: content.substring(0, 300)
+    }));
+    return result;
 }
 
 // ── Simple email lookup (when company is already known) ──
