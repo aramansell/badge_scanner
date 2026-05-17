@@ -501,6 +501,7 @@ els.contactForm.addEventListener('input', () => {
 // ── Camera ────────────────────────────────────────
 async function startCamera() {
     try {
+        stopCamera();  // release any existing stream before acquiring a new one
         stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
             audio: false,
