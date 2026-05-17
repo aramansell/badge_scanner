@@ -931,7 +931,7 @@ IF YOU FIND THE PERSON and their employer MATCHES what the salesperson selected:
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
   "company": "Verified employer name OR best-guess hospital system",
-  "email": "person.name@employer.edu",
+  "email": "jsmith@hospital.edu",
   "confidence": "high|medium|low",
   "reasoning": "Where you found them (e.g. LinkedIn, hospital directory) and whether it matched the salesperson's selection"
 }`;
@@ -1370,8 +1370,10 @@ async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
     // Validate the AI response — if the email isn't a real email, discard it
     if (verified && verified.email) {
         const isRealEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(verified.email);
-        if (!isRealEmail) {
-            console.warn('AI returned non-email value, discarding:', verified.email);
+        const localPart = verified.email.split('@')[0] || '';
+        const isPlaceholder = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody)\b/i.test(localPart);
+        if (!isRealEmail || isPlaceholder) {
+            console.warn('AI returned invalid/placeholder email, discarding:', verified.email);
             verified.email = null;
         }
     }
@@ -1571,10 +1573,21 @@ els.btnSaveKey.addEventListener('click', () => {
 // ── Company email guess helper ──────────────────
 function _guessEmail(companyName, personName) {
     if (typeof LOCAL_DB === 'undefined') return '';
+    if (!personName || !personName.trim()) return '';
+    const names = personName.trim().split(/\s+/);
+    if (names.length < 2) return '';
+    
+    // Reject placeholder names (AI couldn't read the badge)
+    const lowerFull = personName.trim().toLowerCase();
+    const PLACEHOLDER_PATTERNS = /^(person|unknown|first|last|no)\s+(name|last|first)$/i;
+    const PLACEHOLDER_EXACTS = ['person', 'unknown', 'first', 'last', 'no name', 'none'];
+    if (PLACEHOLDER_PATTERNS.test(lowerFull) || PLACEHOLDER_EXACTS.includes(lowerFull)) {
+        console.warn('_guessEmail: refusing to generate email for placeholder name:', personName);
+        return '';
+    }
+
     const match = LOCAL_DB.find(db => db.inst === companyName);
     if (!match || !match.domain) return '';
-    const names = (personName || '').trim().split(' ');
-    if (names.length < 2) return '';
     const f = names[0].toLowerCase();
     const l = names[names.length - 1].toLowerCase();
     const fi = f.charAt(0);
