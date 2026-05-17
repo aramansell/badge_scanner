@@ -930,11 +930,14 @@ IF YOU FIND THE PERSON and their employer MATCHES what the salesperson selected:
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "company": "Verified employer name OR best-guess hospital system",
-  "email": "jsmith@hospital.edu",
+  "company": "name of verified employer (or empty string \"\" if unknown)",
+  "email": "verified email address (or empty string \"\" if unknown)",
   "confidence": "high|medium|low",
   "reasoning": "Where you found them (e.g. LinkedIn, hospital directory) and whether it matched the salesperson's selection"
-}`;
+}
+
+IMPORTANT: If you could not find a real email, return \"\" (empty string) for email.
+Do NOT invent fake placeholder emails like jsmith@hospital.edu or actual_email_guess@company.com. Empty string is better than a guess.`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
@@ -997,10 +1000,13 @@ Also provide a confidence level and one-sentence reasoning about what you found.
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "email": "actual_email_guess@company.com",
+  "email": "verified email (or empty string \"\" if unknown)",
   "confidence": "high|medium|low",
   "reasoning": "One sentence explaining what you found from web search"
-}`;
+}
+
+IMPORTANT: If you could not find a real email, return \"\" (empty string).
+Do NOT invent placeholder emails like actual_email_guess@company.com or jsmith@hospital.edu.`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
@@ -1208,11 +1214,16 @@ function showResult(parsed, imageBlob) {
         if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
     }
 
-    // Validate OCR email — reject placeholders
+    // Validate OCR email — reject AI template/placeholder values
     let ocrEmail = parsed.email || '';
     if (ocrEmail) {
         const localPart = ocrEmail.split('@')[0] || '';
-        if (/\b(person|placeholder|unknown|first|last|name|example|test|user|nobody)\b/i.test(localPart)) {
+        const domain = ocrEmail.split('@')[1] || '';
+        // Catch placeholder local-parts: person, unknown, etc.
+        const localFake = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody|actual_email_guess|jsmith)\b/i.test(localPart);
+        // Catch template domains: hospital.edu, company.com, employer.edu
+        const domainFake = /\b(hospital|employer|company|domain|example)\b/i.test(domain);
+        if (localFake || domainFake) {
             console.warn('OCR returned placeholder email, discarding:', ocrEmail);
             ocrEmail = '';
         }
@@ -1376,12 +1387,14 @@ async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
         console.error('Background verification failed:', err);
     }
 
-    // Validate the AI response — if the email isn't a real email, discard it
+    // Validate the AI response — reject template/placeholder emails
     if (verified && verified.email) {
         const isRealEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(verified.email);
         const localPart = verified.email.split('@')[0] || '';
-        const isPlaceholder = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody)\b/i.test(localPart);
-        if (!isRealEmail || isPlaceholder) {
+        const domain = verified.email.split('@')[1] || '';
+        const localFake = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody|actual_email_guess|jsmith)\b/i.test(localPart);
+        const domainFake = /\b(hospital|employer|company|domain|example)\b/i.test(domain);
+        if (!isRealEmail || localFake || domainFake) {
             console.warn('AI returned invalid/placeholder email, discarding:', verified.email);
             verified.email = null;
         }
