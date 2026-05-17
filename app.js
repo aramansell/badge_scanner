@@ -262,8 +262,14 @@ async function exportCSV() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `badgescan-contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 1000);
     toast(`Exported ${contacts.length} contacts`);
 }
 
@@ -354,8 +360,14 @@ async function exportZip() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `badgescan-export-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 1000);
     toast('Zip downloaded successfully!');
 }
 
