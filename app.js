@@ -919,10 +919,13 @@ Step 3: Find their email.
   Look for public listings, directory pages, or determine the institution's email format and construct the best guess.
   If you find the institution's standard email format (e.g. first.last@ohsu.edu), apply it. If you find the person on a directory page, use that email directly.
 
+CRITICAL — THE EMAIL FIELD MUST ALWAYS BE A REAL EMAIL ADDRESS.
+Even if you cannot find the person online, you MUST construct a reasonable guess using the employer's domain and standard format. Never return placeholder text, example text, or instructions. The value must pass a basic email regex check (contains an @ sign and a domain with a dot).
+
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "company": "The actual, VERIFIED institution name you found",
-  "email": "The actual email you derived (e.g. jane.smith@ohsu.edu)",
+  "company": "Actual employer name or the best guess city+state hospital system",
+  "email": "example.person@hospital.edu",
   "confidence": "high|medium|low",
   "reasoning": "One sentence explaining how you verified their employer and derived the email"
 }`;
@@ -1342,6 +1345,15 @@ async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
         });
     } catch (err) {
         console.error('Background verification failed:', err);
+    }
+
+    // Validate the AI response — if the email isn't a real email, discard it
+    if (verified && verified.email) {
+        const isRealEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(verified.email);
+        if (!isRealEmail) {
+            console.warn('AI returned non-email value, discarding:', verified.email);
+            verified.email = null;
+        }
     }
 
     // Check the contact still exists (user may have cleared all)
