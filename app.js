@@ -1208,7 +1208,16 @@ function showResult(parsed, imageBlob) {
         if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
     }
 
-    if (!els.fEmail.value) els.fEmail.value = parsed.email || '';
+    // Validate OCR email — reject placeholders
+    let ocrEmail = parsed.email || '';
+    if (ocrEmail) {
+        const localPart = ocrEmail.split('@')[0] || '';
+        if (/\b(person|placeholder|unknown|first|last|name|example|test|user|nobody)\b/i.test(localPart)) {
+            console.warn('OCR returned placeholder email, discarding:', ocrEmail);
+            ocrEmail = '';
+        }
+    }
+    if (!els.fEmail.value) els.fEmail.value = ocrEmail;
     if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
 
     // Build notes from badge metadata
