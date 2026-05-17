@@ -37,46 +37,12 @@
             <input type="file" id="input-file" accept="image/*" capture="environment" style="display:none">
         </div>
 
-        <div class="counter-bar">
-            <span class="counter-label">Scanned:</span>
-            <span class="counter-num" id="counter-num">0</span>
+        <div class="preview-wrap hidden" id="preview-wrap" style="display:none; margin-top: 16px;">
+            <img id="result-thumb" alt="Badge preview" style="width: 100%; border-radius: var(--radius);">
+            <button type="button" class="btn btn-ghost btn-full btn-sm" id="btn-rescan" style="margin-top: 8px;">⬅ Rescan</button>
         </div>
 
-        <div class="export-section hidden" id="export-section">
-            <button class="btn btn-ghost btn-full btn-sm" id="btn-export">📥 Export CSV</button>
-            <button class="btn btn-ghost btn-full btn-sm" id="btn-export-images">🖼 Export Images</button>
-            <button class="btn btn-ghost btn-full btn-sm btn-danger" id="btn-clear">🗑 Clear All Contacts</button>
-        </div>
-
-        <div class="status" id="status-text"></div>
-    </div>
-
-    <!-- Processing Screen -->
-    <div id="screen-processing" class="screen">
-        <div class="header">
-            <div class="logo">Badge<span class="accent">Scan</span></div>
-        </div>
-        <div class="processing">
-            <div class="spinner"></div>
-            <div class="processing-step pending" id="step-0">📷 Reading badge...</div>
-            <div class="processing-step pending" id="step-1">🔍 Finding contact details...</div>
-            <div class="processing-step pending" id="step-2">📧 Looking up email address...</div>
-            <pre id="debug-out" style="display:none;width:100%;max-height:150px;overflow-y:auto;font-size:10px;background:#020617;color:#22c55e;padding:8px;border-radius:8px;margin-top:8px;white-space:pre-wrap;word-break:break-all"></pre>
-        </div>
-    </div>
-
-    <!-- Result / Contact Form Screen -->
-    <div id="screen-result" class="screen">
-        <div class="header">
-            <div class="logo">Badge<span class="accent">Scan</span></div>
-            <button class="btn btn-ghost btn-sm" id="btn-rescan">⬅ Rescan</button>
-        </div>
-
-        <div class="preview-wrap">
-            <img id="result-thumb" alt="Badge preview">
-        </div>
-
-        <form class="contact-form" id="contact-form" autocomplete="off">
+        <form class="contact-form" id="contact-form" autocomplete="off" style="margin-top: 16px;">
             <div class="form-row">
                 <div class="form-group" style="flex:1">
                     <label>Salutation</label>
@@ -85,6 +51,17 @@
                 <div class="form-group" style="flex:3">
                     <label>Name *</label>
                     <input id="f-name" type="text" placeholder="Full name" required>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>City</label>
+                    <input id="f-city" type="text" placeholder="City">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label>State</label>
+                    <input id="f-state" type="text" placeholder="State">
                 </div>
             </div>
 
@@ -118,6 +95,33 @@
                 <button type="submit" class="btn btn-primary btn-full">✅ Save Contact</button>
             </div>
         </form>
+
+        <div class="counter-bar">
+            <span class="counter-label">Scanned:</span>
+            <span class="counter-num" id="counter-num">0</span>
+        </div>
+
+        <div class="export-section hidden" id="export-section">
+            <button class="btn btn-ghost btn-full btn-sm" id="btn-export">📥 Export CSV</button>
+            <button class="btn btn-ghost btn-full btn-sm" id="btn-export-images">🖼 Export Images</button>
+            <button class="btn btn-ghost btn-full btn-sm btn-danger" id="btn-clear">🗑 Clear All Contacts</button>
+        </div>
+
+        <div class="status" id="status-text"></div>
+    </div>
+
+    <!-- Processing Screen -->
+    <div id="screen-processing" class="screen">
+        <div class="header">
+            <div class="logo">Badge<span class="accent">Scan</span></div>
+        </div>
+        <div class="processing">
+            <div class="spinner"></div>
+            <div class="processing-step pending" id="step-0">📷 Reading badge...</div>
+            <div class="processing-step pending" id="step-1">🔍 Local Database Lookup...</div>
+            <div class="processing-step pending" id="step-2" style="display:none">📧 AI Enrichment...</div>
+            <pre id="debug-out" style="display:none;width:100%;max-height:150px;overflow-y:auto;font-size:10px;background:#020617;color:#22c55e;padding:8px;border-radius:8px;margin-top:8px;white-space:pre-wrap;word-break:break-all"></pre>
+        </div>
     </div>
 
     <!-- API Key Modal -->

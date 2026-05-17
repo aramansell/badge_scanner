@@ -9,7 +9,6 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const screens = {
     camera: $('#screen-camera'),
     processing: $('#screen-processing'),
-    result: $('#screen-result'),
 };
 
 const els = {
@@ -21,6 +20,8 @@ const els = {
     btnRescan: $('#btn-rescan'),
     statusText: $('#status-text'),
     steps: $$('.processing-step'),
+    previewWrap: $('#preview-wrap'),
+    cameraWrap: $('.camera-wrap'),
     resultThumb: $('#result-thumb'),
     apiKeyModal: $('#modal-apikey'),
     apiKeyInput: $('#input-apikey'),
@@ -35,6 +36,8 @@ const els = {
     // Form fields
     fSalutation: $('#f-salutation'),
     fName: $('#f-name'),
+    fCity: $('#f-city'),
+    fState: $('#f-state'),
     fTitle: $('#f-title'),
     fCompany: $('#f-company'),
     fEmail: $('#f-email'),
@@ -47,6 +50,21 @@ const els = {
 let stream = null;
 let currentImage = null;
 let _currentParsed = null;  // parsed badge data from OCR, merged on save
+let _formEdited = false; // track if human edited before save
+
+// ── Local Database Mock ───────────────────────────
+const LOCAL_DB = [
+    { inst: "OHSU", city: "Portland", state: "OR", domain: "ohsu.edu", fmt: "firstlast", type: "hospital" },
+    { inst: "Pacific University", city: "Portland", state: "OR", domain: "pacificu.edu", fmt: "first.last", type: "program" },
+    { inst: "Legacy Health", city: "Portland", state: "OR", domain: "lhs.org", fmt: "first.last", type: "hospital" },
+    { inst: "Providence Portland", city: "Portland", state: "OR", domain: "providence.org", fmt: "first.last", type: "hospital" },
+    { inst: "Duke University", city: "Durham", state: "NC", domain: "duke.edu", fmt: "first.last", type: "program" },
+    { inst: "UNC Health", city: "Chapel Hill", state: "NC", domain: "unchealth.org", fmt: "first.last", type: "hospital" },
+    { inst: "UCSF", city: "San Francisco", state: "CA", domain: "ucsf.edu", fmt: "firstlast", type: "program" },
+    { inst: "Kaiser Permanente", city: "San Francisco", state: "CA", domain: "kp.org", fmt: "first.last", type: "hospital" },
+    { inst: "University of Washington", city: "Seattle", state: "WA", domain: "uw.edu", fmt: "firstlast", type: "program" },
+    { inst: "Swedish Medical Center", city: "Seattle", state: "WA", domain: "swedish.org", fmt: "first.last", type: "hospital" }
+];
 
 // ── Contact Store (OPFS) ──────────────────────────
 // All contacts + badge images live in OPFS:
@@ -200,11 +218,12 @@ async function exportCSV() {
     const contacts = getContacts();
     if (!contacts.length) return toast('No contacts to export', true);
 
-    const headers = ['Name', 'Credentials', 'Salutation', 'Title', 'Specialty', 'Company', 'Email', 'Phone', 'City', 'State', 'Notes', 'Captured'];
+    const headers = ['Name', 'Credentials', 'Salutation', 'Title', 'Specialty', 'Company', 'Email', 'Phone', 'City', 'State', 'Notes', 'Captured', 'AI_Enriched'];
     const rows = contacts.map((c) =>
         [
             c.name, c.credentials, c.salutation, c.title, c.specialty,
             c.company, c.email, c.phone, c.city, c.state, c.notes, c.captured_at,
+            c.version === 2 ? 'Yes (v2)' : (c.enriched ? 'Yes (Has v2)' : 'No')
         ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
     );
 
@@ -358,6 +377,11 @@ function updateCounter() {
     }
 }
 
+// ── Track human edits ────────────────────────────
+els.contactForm.addEventListener('input', () => {
+    _formEdited = true;
+});
+
 // ── Camera ────────────────────────────────────────
 async function startCamera() {
     try {
@@ -368,6 +392,11 @@ async function startCamera() {
         els.preview.srcObject = stream;
         els.btnCapture.disabled = false;
         els.statusText.textContent = '';
+        
+        // Reset UI state
+        els.cameraWrap.style.display = 'block';
+        els.previewWrap.style.display = 'none';
+        
     } catch (err) {
         console.error('Camera error:', err);
         if (err.name === 'NotAllowedError') {
@@ -388,14 +417,108 @@ function stopCamera() {
     els.preview.srcObject = null;
 }
 
-function captureFrame() {
+// ── Image Sharpness (Laplacian Variance) ──────────
+function computeLaplacianVariance(canvas, ctx, width, height) {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const grayscale = new Float32Array(width * height);
+    
+    // Convert to grayscale
+    for (let i = 0; i < data.length; i += 4) {
+        grayscale[i / 4] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    }
+    
+    const laplacian = new Float32Array(width * height);
+    let mean = 0;
+    
+    // Apply 3x3 Laplacian filter
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const idx = y * width + x;
+            const val = grayscale[idx] * 4
+                        - grayscale[idx - 1]
+                        - grayscale[idx + 1]
+                        - grayscale[idx - width]
+                        - grayscale[idx + width];
+            laplacian[idx] = val;
+            mean += val;
+        }
+    }
+    
+    const count = (width - 2) * (height - 2);
+    mean /= count;
+    
+    let variance = 0;
+    for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+            const val = laplacian[y * width + x];
+            variance += (val - mean) * (val - mean);
+        }
+    }
+    return variance / count;
+}
+
+async function captureBurst() {
     const video = els.preview;
     const canvas = els.canvas;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
-    return canvas.toDataURL('image/jpeg', 0.85);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    const frames = [];
+    const NUM_FRAMES = 3;
+    
+    for (let i = 0; i < NUM_FRAMES; i++) {
+        ctx.drawImage(video, 0, 0);
+        // We only need to check sharpness of a smaller central crop to be fast
+        const cropW = Math.floor(canvas.width * 0.5);
+        const cropH = Math.floor(canvas.height * 0.5);
+        const startX = Math.floor(canvas.width * 0.25);
+        const startY = Math.floor(canvas.height * 0.25);
+        
+        // Use a temporary canvas for the crop
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = cropW;
+        tempCanvas.height = cropH;
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        tempCtx.drawImage(canvas, startX, startY, cropW, cropH, 0, 0, cropW, cropH);
+        
+        const variance = computeLaplacianVariance(tempCanvas, tempCtx, cropW, cropH);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        frames.push({ variance, dataUrl });
+        
+        // Wait ~100ms between frames
+        if (i < NUM_FRAMES - 1) {
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+    
+    // Sort by descending variance (sharpest first)
+    frames.sort((a, b) => b.variance - a.variance);
+    return frames[0].dataUrl;
+}
+
+// ── Local Database Lookup ─────────────────────────
+function localDbLookup(parsed) {
+    const city = (parsed.city || els.fCity.value).trim().toLowerCase();
+    const state = (parsed.state || els.fState.value).trim().toLowerCase();
+    const company = (parsed.company || els.fCompany.value).trim().toLowerCase();
+
+    // If we have an explicitly stated company on the badge, check if it's in our DB
+    if (company) {
+        const match = LOCAL_DB.find(db => company.includes(db.inst.toLowerCase()));
+        if (match) return [match];
+    }
+
+    if (!city || !state) return [];
+
+    // Find all institutions in that city+state
+    const candidates = LOCAL_DB.filter(db => 
+        db.city.toLowerCase() === city && 
+        db.state.toLowerCase() === state
+    );
+    
+    return candidates;
 }
 
 // ── Helpers ───────────────────────────────────────
@@ -796,30 +919,145 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
     return extractJSON(content);
 }
 
+// ── Background Enrichment Queue ───────────────────
+const ENRICHMENT_QUEUE_KEY = 'badgescan_enrichment_queue';
+
+function getEnrichmentQueue() {
+    try {
+        return JSON.parse(localStorage.getItem(ENRICHMENT_QUEUE_KEY) || '[]');
+    } catch {
+        return [];
+    }
+}
+
+function saveEnrichmentQueue(queue) {
+    localStorage.setItem(ENRICHMENT_QUEUE_KEY, JSON.stringify(queue));
+}
+
+function enqueueForEnrichment(contact) {
+    const queue = getEnrichmentQueue();
+    if (!queue.includes(contact.id)) {
+        queue.push(contact.id);
+        saveEnrichmentQueue(queue);
+    }
+    
+    // Kick off processing if not already running
+    processEnrichmentQueue();
+}
+
+let _isProcessingQueue = false;
+
+async function processEnrichmentQueue() {
+    if (_isProcessingQueue) return;
+    _isProcessingQueue = true;
+
+    try {
+        let queue = getEnrichmentQueue();
+        while (queue.length > 0) {
+            const contactId = queue[0];
+            
+            // Re-fetch the full contact from cache just to be sure we have the latest
+            const contacts = getContacts();
+            const contact = contacts.find(c => c.id === contactId);
+            
+            if (contact && !contact.edited && !contact.enriched && contact.version === 1) {
+                try {
+                    console.log(`Background enriching contact: ${contact.name}...`);
+                    
+                    const result = await resolveInstitution({
+                        name: contact.name,
+                        company: contact.company,
+                        title: contact.title,
+                        credentials: contact.credentials,
+                        specialty: contact.specialty,
+                        city: contact.city,
+                        state: contact.state
+                    });
+                    
+                    if (result && (result.company || result.email)) {
+                        // Create v2 contact
+                        const v2Contact = { ...contact };
+                        // Remove the original ID so it gets a new one
+                        delete v2Contact.id;
+                        v2Contact.company = result.company || contact.company;
+                        v2Contact.email = result.email || contact.email;
+                        
+                        // Add confidence reasoning to notes
+                        if (result.reasoning) {
+                            v2Contact.notes = (v2Contact.notes ? v2Contact.notes + '\n\n' : '') + `AI Enriched v2 (${result.confidence} confidence): ${result.reasoning}`;
+                        } else {
+                            v2Contact.notes = (v2Contact.notes ? v2Contact.notes + '\n\n' : '') + `AI Enriched v2`;
+                        }
+                        
+                        v2Contact.version = 2;
+                        v2Contact.original_version = contact.id;
+                        v2Contact.edited = false;
+                        v2Contact.enriched = false; // v2 itself isn't enriched further
+                        v2Contact.captured_at = new Date().toISOString(); // Give it a new timestamp
+                        
+                        // Copy image from v1
+                        const img = await getContactImage(contact.id);
+                        
+                        // Save v2
+                        await storeContact(v2Contact, img);
+                        
+                        // Mark v1 as enriched
+                        contact.enriched = true;
+                        // For v1, we don't need to re-save the image, just the json
+                        await storeContact(contact, null); 
+                        console.log(`Enrichment complete for ${contact.name} -> v2 created.`);
+                    }
+                } catch (err) {
+                    console.error(`Enrichment failed for ${contact.name}:`, err);
+                    // On error, drop it to prevent infinite loop for now
+                }
+            }
+            
+            // Remove from queue
+            queue = getEnrichmentQueue();
+            queue.shift(); // remove the first item we just processed
+            saveEnrichmentQueue(queue);
+            
+            // Small delay between processing
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    } finally {
+        _isProcessingQueue = false;
+    }
+}
+
 // ── Show result screen ────────────────────────────
 function showResult(parsed, imageBlob) {
-    // Set thumbnail
+    // Hide camera, show thumbnail
+    els.cameraWrap.style.display = 'none';
+    els.previewWrap.style.display = 'block';
+
     const url = URL.createObjectURL(imageBlob);
     els.resultThumb.src = url;
 
-    // Populate form
-    els.fSalutation.value = parsed.salutation || '';
-    els.fName.value = parsed.name || '';
-    els.fTitle.value = parsed.title || '';
-    els.fCompany.value = parsed.company || '';
-    els.fEmail.value = parsed.email || '';
-    els.fPhone.value = parsed.phone || '';
+    // Merge logic: only overwrite if field is empty
+    if (!els.fSalutation.value) els.fSalutation.value = parsed.salutation || '';
+    if (!els.fName.value) els.fName.value = parsed.name || '';
+    if (!els.fCity.value) els.fCity.value = parsed.city || '';
+    if (!els.fState.value) els.fState.value = parsed.state || '';
+    if (!els.fTitle.value) els.fTitle.value = parsed.title || '';
+    if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
+    if (!els.fEmail.value) els.fEmail.value = parsed.email || '';
+    if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
 
     // Build notes from badge metadata
-    const parts = [];
-    if (parsed.credentials) parts.push(parsed.credentials);
-    if (parsed.specialty) parts.push(parsed.specialty);
-    if (parsed.city && parsed.state) parts.push(`${parsed.city}, ${parsed.state}`);
-    else if (parsed.city) parts.push(parsed.city);
-    else if (parsed.state) parts.push(parsed.state);
-    els.fNotes.value = parts.length
-        ? `Met at AAPA 2026. Badge: ${parts.join(' — ')}`
-        : 'Met at AAPA 2026.';
+    if (!els.fNotes.value) {
+        const parts = [];
+        if (parsed.credentials) parts.push(parsed.credentials);
+        if (parsed.specialty) parts.push(parsed.specialty);
+        if (parsed.city && parsed.state) parts.push(`${parsed.city}, ${parsed.state}`);
+        else if (parsed.city) parts.push(parsed.city);
+        else if (parsed.state) parts.push(parsed.state);
+        
+        els.fNotes.value = parts.length
+            ? `Met at ${getConference() || 'conference'}. Badge: ${parts.join(' — ')}`
+            : `Met at ${getConference() || 'conference'}.`;
+    }
 
     // Email confidence indicator
     if (parsed.email_confidence) {
@@ -830,6 +1068,9 @@ function showResult(parsed, imageBlob) {
         els.emailConf.className = 'email-confidence ' +
             (parsed.email_confidence === 'high' ? 'confident' :
                 parsed.email_confidence === 'low' ? 'uncertain' : 'uncertain');
+    } else if (parsed.db_guess) {
+        els.emailConf.textContent = parsed.db_guess;
+        els.emailConf.className = 'email-confidence uncertain';
     } else {
         els.emailConf.textContent = '';
     }
@@ -837,7 +1078,8 @@ function showResult(parsed, imageBlob) {
     // Stash parsed data for merge on save
     _currentParsed = parsed;
 
-    showScreen('result');
+    // Show camera screen (form is now part of it)
+    showScreen('camera');
 }
 
 // ── Process image ─────────────────────────────────
@@ -850,8 +1092,7 @@ async function processImage(imageBlob) {
         s.classList.remove('done');
     });
     els.steps[0].textContent = '📷 Reading badge...';
-    els.steps[1].textContent = '🔍 Finding contact details...';
-    els.steps[2].textContent = '📧 Resolving institution & email...';
+    els.steps[1].textContent = '🔍 Local Database Lookup...';
 
     try {
         // Step 1: OCR / parse badge with Vision
@@ -860,27 +1101,39 @@ async function processImage(imageBlob) {
         setStep(0, 'done');
 
         // Step 2: Verify we got useful data
-        if (!parsedData || !parsedData.name || parsedData.name.trim() === '') {
+        if (!parsedData || (!parsedData.name && !els.fName.value)) {
             setStep(0, 'done');
-            throw new Error('Could not read a name from the badge. Try a clearer photo.');
+            throw new Error('Could not read a name from the badge. Try a clearer photo or type it manually.');
+        }
+        
+        // Phase 1: Local DB Lookup (Instant)
+        setStep(1, 'in_progress');
+        const candidates = localDbLookup(parsedData);
+        if (candidates.length > 0) {
+            const best = candidates[0];
+            if (!parsedData.company) parsedData.company = best.inst;
+            
+            // Generate best guess format
+            let emailGuess = '';
+            const names = (parsedData.name || els.fName.value).split(' ');
+            if (names.length >= 2 && best.domain) {
+                const f = names[0].toLowerCase();
+                const l = names[names.length - 1].toLowerCase();
+                if (best.fmt === 'firstlast') emailGuess = `${f}${l}@${best.domain}`;
+                else if (best.fmt === 'first.last') emailGuess = `${f}.${l}@${best.domain}`;
+            }
+            if (!parsedData.email) parsedData.email = emailGuess;
+            
+            if (candidates.length > 1) {
+                const others = candidates.slice(1, 4).map(c => c.inst).join(', ');
+                parsedData.db_guess = `Best guess - ${best.inst}. Also possible: ${others}`;
+            } else {
+                parsedData.db_guess = `Matched from local DB: ${best.inst}`;
+            }
         }
         setStep(1, 'done');
 
-        // Step 3: Institution resolver + email lookup
-        setStep(2, 'in_progress');
-        const resolved = await resolveInstitution(parsedData);
-        if (resolved) {
-            // Only override company if we resolved one (don't wipe an existing one)
-            if (resolved.company && !parsedData.company) {
-                parsedData.company = resolved.company;
-            }
-            parsedData.email = resolved.email;
-            parsedData.email_confidence = resolved.confidence;
-            parsedData.email_reasoning = resolved.reasoning;
-        }
-        setStep(2, 'done');
-
-        // Show result
+        // Show result on the camera screen
         showResult(parsedData, imageBlob);
 
     } catch (err) {
@@ -891,10 +1144,17 @@ async function processImage(imageBlob) {
 }
 
 // ── Event: Capture button ─────────────────────────
-els.btnCapture.addEventListener('click', () => {
-    const dataUrl = captureFrame();
-    currentImage = dataURLtoBlob(dataUrl);
-    processImage(currentImage);
+els.btnCapture.addEventListener('click', async () => {
+    els.btnCapture.disabled = true;
+    try {
+        const dataUrl = await captureBurst();
+        currentImage = dataURLtoBlob(dataUrl);
+        processImage(currentImage);
+    } catch (err) {
+        console.error('Capture burst failed', err);
+        toast('Camera capture failed', true);
+        els.btnCapture.disabled = false;
+    }
 });
 
 // ── Event: File upload ────────────────────────────
@@ -922,6 +1182,8 @@ els.contactForm.addEventListener('submit', async (e) => {
     const contact = {
         name: els.fName.value.trim(),
         salutation: els.fSalutation.value.trim(),
+        city: els.fCity.value.trim(),
+        state: els.fState.value.trim(),
         title: els.fTitle.value.trim(),
         company: els.fCompany.value.trim(),
         email: els.fEmail.value.trim(),
@@ -930,9 +1192,13 @@ els.contactForm.addEventListener('submit', async (e) => {
         // Fields from badge OCR (not in the form)
         credentials: _currentParsed?.credentials || '',
         specialty: _currentParsed?.specialty || '',
-        city: _currentParsed?.city || '',
-        state: _currentParsed?.state || '',
         captured_at: new Date().toISOString(),
+        
+        // Phase 2 architecture metadata
+        version: 1,
+        edited: _formEdited,
+        enriched: false,
+        original_version: null
     };
 
     if (!contact.name) {
@@ -941,13 +1207,21 @@ els.contactForm.addEventListener('submit', async (e) => {
     }
 
     // Store contact + badge image in OPFS
-    await storeContact(contact, currentImage || null);
+    const id = await storeContact(contact, currentImage || null);
+    contact.id = id;
     toast(`Saved: ${contact.name}`);
+
+    // If human didn't edit it (aside from maybe pre-filling, but we tracked any input as edit), queue for background enrichment
+    if (!contact.edited) {
+        enqueueForEnrichment(contact);
+    }
 
     // Reset and go back to camera
     currentImage = null;
     _currentParsed = null;
+    _formEdited = false;
     els.contactForm.reset();
+    els.emailConf.textContent = '';
     showScreen('camera');
     startCamera();
 });
@@ -1003,6 +1277,9 @@ async function init() {
     if (!getApiKey()) {
         els.apiKeyModal.classList.add('active');
     }
+
+    // Start background queue processing
+    setTimeout(processEnrichmentQueue, 5000);
 
     // Start camera
     startCamera();
