@@ -845,25 +845,18 @@ Fields to extract:
 }
 
 // ── OpenAI: Institution resolver + email lookup ────
-// When company is on the badge, uses it directly. When not, searches for
-// teaching hospitals / universities with PA programs in the given city+state
-// and matches the person.
+// This function performs a deep web search to verify the person's true employer
+// and find their email. It does not blindly trust the initial company guess.
 async function resolveInstitution(parsed) {
     const { name, company, title, credentials, specialty, city, state } = parsed;
 
-    // Branch 1: company is known — straightforward email lookup
-    if (company) {
-        return lookupEmailSimple(name, company);
-    }
-
-    // Branch 2: no company — must resolve institution from city+state+specialty
     const location = city && state ? `${city}, ${state}` : (city || state || 'unknown location');
     const spec = specialty || 'unknown specialty';
     const creds = credentials || 'PA';
     const role = title || '';
 
     const instructions = `You are a medical conference lead-capture assistant.
-Your job: given a person at the AAPA 2026 conference, find their employer and email.
+Your job: given a person at the AAPA 2026 conference, find their VERIFIED employer and email.
 
 PERSON DETAILS:
   Name: ${name}
@@ -871,53 +864,33 @@ PERSON DETAILS:
   Title/Role: ${role || 'not listed'}
   Specialty: ${spec}
   Location (from badge): ${location}
+  ${company ? `Current Employer Guess: ${company} (WARNING: This might be incorrect!)` : ''}
 
 CRITICAL — WHAT TO DO:
 
-Step 1: Identify the most likely employer.
-  This person works in ${location}. Find teaching hospitals and medical universities
-  in ${location} that have a PA program (Physician Assistant program).
-  This is a PA conference — the person almost certainly works at an institution
-  that trains PAs or employs PAs in a teaching hospital setting.
+Step 1: Identify the actual employer.
+  I am looking for ${name} who is a PA in ${location}. You have to keep looking until you find this specific person and figure out where their actual place of employment is.
+  ${company ? `You might see "${company}" as a guess, but you MUST keep looking until you verify where their actual place of employment is. Do NOT blindly trust the guess.` : `Search for teaching hospitals and medical universities in ${location} that have a PA program.`}
 
   Use web_search. Search queries to try:
+  - "${name} ${location} PA"
+  - "${name} ${creds} ${location}"
+  - "${name} LinkedIn ${location}"
   - "${location} teaching hospital PA program"
-  - "${location} medical university physician assistant program"
-  - "${location} academic medical center"
-  - "${name} ${location}"
 
-  Narrow to the 1-2 most likely institutions based on the person's specialty
-  (${spec}) and the fact they're at AAPA.
-
-Step 2: Match the person to that institution.
-  Search for "${name}" at the institution you identified. Try:
-  - "${name}" combined with the institution name
-  - "${name} PA" or "${name} ${creds}" combined with the institution name
-  - "${name} ${location}"
+Step 2: Match the person to the institution.
+  Once you find the person, identify their current employer. Verify it by finding a real webpage, directory, or LinkedIn profile for them.
 
 Step 3: Find their email.
-  Same approach — look for public listings, directory pages, or determine
-  the institution's email format and construct the best guess.
-  If you find the institution's standard email format (e.g. first.last@ohsu.edu),
-  apply it. If you find the person on a directory page, use that email directly.
-
-IMPORTANT RULES:
-- Only consider teaching hospitals and medical schools/universities WITH a PA program.
-- If ${location} is Portland, OR — OHSU is a major teaching hospital there. Duke in
-  Durham, NC. UCSF in San Francisco. Use your web_search to find the right one.
-- Do NOT pick random clinics, private practices, or non-teaching hospitals.
-- If you cannot find a match, pick the most likely teaching hospital in
-  ${location} and guess the email using its naming convention.
-- You MUST search the web. Do not guess without searching.
-- NEVER use placeholder text like "institution.edu" — always produce a real domain
-  from your web search results.
+  Look for public listings, directory pages, or determine the institution's email format and construct the best guess.
+  If you find the institution's standard email format (e.g. first.last@ohsu.edu), apply it. If you find the person on a directory page, use that email directly.
 
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object:
 {
-  "company": "The actual institution name you found",
+  "company": "The actual, VERIFIED institution name you found",
   "email": "The actual email you derived (e.g. jane.smith@ohsu.edu)",
   "confidence": "high|medium|low",
-  "reasoning": "One sentence explaining which institution you found and how you derived the email"
+  "reasoning": "One sentence explaining how you verified their employer and derived the email"
 }`;
 
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -934,7 +907,7 @@ Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object
                     type: 'message',
                     role: 'user',
                     content: [
-                        { type: 'input_text', text: `Resolve the employer and email for ${name} (${creds}) who practices ${spec} in ${location}.` },
+                        { type: 'input_text', text: `Find the verified employer and email for ${name} (${creds}) who practices ${spec} in ${location}.` },
                     ],
                 },
             ],
