@@ -314,6 +314,51 @@ async function exportAllImages() {
     return count;
 }
 
+// ── ZIP Export ─────────────────────────────────────
+async function exportZip() {
+    const contacts = getContacts();
+    if (!contacts.length) {
+        toast('No contacts to export', true);
+        return;
+    }
+
+    toast(`Zipping ${contacts.length} contacts... Please wait.`);
+    const zip = new JSZip();
+
+    // 1. Add CSV
+    const headers = ['Name', 'Credentials', 'Salutation', 'Title', 'Specialty', 'Company', 'Email', 'Phone', 'City', 'State', 'Notes', 'Captured', 'AI_Enriched'];
+    const rows = contacts.map((c) =>
+        [
+            c.name, c.credentials, c.salutation, c.title, c.specialty,
+            c.company, c.email, c.phone, c.city, c.state, c.notes, c.captured_at,
+            c.version === 2 ? 'Yes (v2)' : (c.enriched ? 'Yes (Has v2)' : 'No')
+        ].map((v) => `"${(v || '').replace(/"/g, '""')}"`).join(',')
+    );
+    const csv = [headers.join(','), ...rows].join('\n');
+    zip.file('contacts.csv', csv);
+
+    // 2. Add Images
+    const imgFolder = zip.folder('images');
+    for (const contact of contacts) {
+        const imgBlob = await getContactImage(contact.id);
+        if (imgBlob) {
+            const safeName = (contact.name || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+            const fileName = `${safeName}_${contact.id}.jpg`;
+            imgFolder.file(fileName, imgBlob);
+        }
+    }
+
+    // 3. Generate and download
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `badgescan-export-${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Zip downloaded successfully!');
+}
+
 // ── Migration: move old localStorage contacts + images into OPFS ──
 async function _migrateOldData() {
     // Check if OPFS already has contacts
