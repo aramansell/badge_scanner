@@ -30,8 +30,7 @@ const els = {
     // Camera screen extras
     counterNum: $('#counter-num'),
     exportSection: $('#export-section'),
-    btnExport: $('#btn-export'),
-    btnExportImages: $('#btn-export-images'),
+    btnExportZip: $('#btn-export-zip'),
     btnClear: $('#btn-clear'),
     // Form fields
     fSalutation: $('#f-salutation'),
@@ -45,6 +44,7 @@ const els = {
     fNotes: $('#f-notes'),
     emailConf: $('#email-confidence'),
     contactForm: $('#contact-form'),
+    webhookInput: $('#input-webhook'),
 };
 
 let stream = null;
@@ -54,15 +54,15 @@ let _formEdited = false; // track if human edited before save
 
 // ── Local Database Mock ───────────────────────────
 const LOCAL_DB = [
-    { inst: "OHSU", city: "Portland", state: "OR", domain: "ohsu.edu", fmt: "firstlast", type: "hospital" },
-    { inst: "Pacific University", city: "Portland", state: "OR", domain: "pacificu.edu", fmt: "first.last", type: "program" },
-    { inst: "Legacy Health", city: "Portland", state: "OR", domain: "lhs.org", fmt: "first.last", type: "hospital" },
+    { inst: "OHSU", city: "Portland", state: "OR", domain: "ohsu.edu", fmt: "lastf", type: "hospital" },
+    { inst: "Pacific University", city: "Portland", state: "OR", domain: "pacificu.edu", fmt: "flast", type: "program" },
+    { inst: "Legacy Health", city: "Portland", state: "OR", domain: "lhs.org", fmt: "flast", type: "hospital" },
     { inst: "Providence Portland", city: "Portland", state: "OR", domain: "providence.org", fmt: "first.last", type: "hospital" },
     { inst: "Duke University", city: "Durham", state: "NC", domain: "duke.edu", fmt: "first.last", type: "program" },
-    { inst: "UNC Health", city: "Chapel Hill", state: "NC", domain: "unchealth.org", fmt: "first.last", type: "hospital" },
-    { inst: "UCSF", city: "San Francisco", state: "CA", domain: "ucsf.edu", fmt: "firstlast", type: "program" },
+    { inst: "UNC Health", city: "Chapel Hill", state: "NC", domain: "unchealth.unc.edu", fmt: "first.last", type: "hospital" },
+    { inst: "UCSF", city: "San Francisco", state: "CA", domain: "ucsf.edu", fmt: "first.last", type: "program" },
     { inst: "Kaiser Permanente", city: "San Francisco", state: "CA", domain: "kp.org", fmt: "first.last", type: "hospital" },
-    { inst: "University of Washington", city: "Seattle", state: "WA", domain: "uw.edu", fmt: "firstlast", type: "program" },
+    { inst: "University of Washington", city: "Seattle", state: "WA", domain: "uw.edu", fmt: "flast", type: "program" },
     { inst: "Swedish Medical Center", city: "Seattle", state: "WA", domain: "swedish.org", fmt: "first.last", type: "hospital" }
 ];
 
@@ -127,14 +127,52 @@ async function _saveIndex() {
     localStorage.setItem('badgescan_index', JSON.stringify(idx));
 }
 
+async function compressImage(blob, maxDim = 1080) {
+    if (!blob) return null;
+    const bitmap = await createImageBitmap(blob);
+    let { width, height } = bitmap;
+    if (width > maxDim || height > maxDim) {
+        if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+        } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+        }
+    }
+    const cvs = document.createElement('canvas');
+    cvs.width = width;
+    cvs.height = height;
+    const ctx = cvs.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    return new Promise(resolve => cvs.toBlob(resolve, 'image/jpeg', 0.8));
+}
+
 async function storeContact(contact, imageBlob) {
     const id = contact.id || crypto.randomUUID();
     contact.id = id;
 
+    const compressedBlob = await compressImage(imageBlob);
+
     const dir = await _contactDir(id);
     await _writeJSON(dir, 'contact.json', contact);
-    if (imageBlob) {
-        await _writeBlob(dir, 'badge.jpg', imageBlob);
+    if (compressedBlob) {
+        await _writeBlob(dir, 'badge.jpg', compressedBlob);
+    }
+
+    const webhookUrl = getWebhook();
+    if (webhookUrl) {
+        try {
+            await fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(contact),
+                mode: 'no-cors'
+            });
+            console.log("Webhook triggered");
+        } catch (e) {
+            console.error("Webhook failed", e);
+        }
     }
 
     // Update in-memory cache
@@ -366,6 +404,15 @@ function getConference() {
 
 function setConference(name) {
     localStorage.setItem('badgescan_conference', name.trim());
+}
+
+// ── Webhook ──────────────────────────────
+function getWebhook() {
+    return localStorage.getItem('badgescan_webhook') || '';
+}
+
+function setWebhook(url) {
+    localStorage.setItem('badgescan_webhook', url.trim());
 }
 
 // ── Counter (sync, uses in-memory cache) ───────────
@@ -951,6 +998,15 @@ async function processEnrichmentQueue() {
     if (_isProcessingQueue) return;
     _isProcessingQueue = true;
 
+    let wakeLock = null;
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+            console.warn('Wake Lock failed:', err);
+        }
+    }
+
     try {
         let queue = getEnrichmentQueue();
         while (queue.length > 0) {
@@ -1119,8 +1175,12 @@ async function processImage(imageBlob) {
             if (names.length >= 2 && best.domain) {
                 const f = names[0].toLowerCase();
                 const l = names[names.length - 1].toLowerCase();
+                const fi = f.charAt(0);
+                
                 if (best.fmt === 'firstlast') emailGuess = `${f}${l}@${best.domain}`;
                 else if (best.fmt === 'first.last') emailGuess = `${f}.${l}@${best.domain}`;
+                else if (best.fmt === 'flast') emailGuess = `${fi}${l}@${best.domain}`;
+                else if (best.fmt === 'lastf') emailGuess = `${l}${fi}@${best.domain}`;
             }
             if (!parsedData.email) parsedData.email = emailGuess;
             
@@ -1226,14 +1286,9 @@ els.contactForm.addEventListener('submit', async (e) => {
     startCamera();
 });
 
-// ── Event: Export CSV ──────────────────────────────
-els.btnExport.addEventListener('click', () => {
-    exportCSV().catch(err => toast('Export failed: ' + err.message, true));
-});
-
-// ── Event: Export Images ──────────────────────────
-els.btnExportImages.addEventListener('click', () => {
-    exportAllImages().catch(err => toast('Image export failed: ' + err.message, true));
+// ── Event: Export Zip ──────────────────────────────
+els.btnExportZip.addEventListener('click', () => {
+    exportZip().catch(err => toast('Export failed: ' + err.message, true));
 });
 
 // ── Event: Clear All ──────────────────────────────
@@ -1241,10 +1296,11 @@ els.btnClear.addEventListener('click', () => {
     clearAllContacts().catch(err => toast('Clear failed: ' + err.message, true));
 });
 
-// ── API Key modal ─────────────────────────────────
+// ── Settings modal ─────────────────────────────────
 $('#btn-apikey').addEventListener('click', () => {
     els.apiKeyInput.value = getApiKey();
     els.confInput.value = getConference();
+    if (els.webhookInput) els.webhookInput.value = getWebhook();
     els.apiKeyModal.classList.add('active');
 });
 
@@ -1255,9 +1311,11 @@ $('.modal-bg').addEventListener('click', () => {
 els.btnSaveKey.addEventListener('click', () => {
     const key = els.apiKeyInput.value.trim();
     const conf = els.confInput.value.trim();
+    const webhook = els.webhookInput ? els.webhookInput.value.trim() : '';
     if (!key) return toast('Please enter an API key', true);
     setApiKey(key);
     setConference(conf);
+    setWebhook(webhook);
     els.apiKeyModal.classList.remove('active');
     toast('Settings saved');
 });

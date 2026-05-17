@@ -34,7 +34,7 @@
         <div class="actions">
             <button class="btn btn-primary btn-full" id="btn-capture" disabled>📸 Capture Badge</button>
             <button class="btn btn-ghost btn-full" id="btn-file">🖼 Upload Photo</button>
-            <input type="file" id="input-file" accept="image/*" capture="environment" style="display:none">
+            <input type="file" id="input-file" accept="image/*" style="display:none">
         </div>
 
         <div class="preview-wrap hidden" id="preview-wrap" style="display:none; margin-top: 16px;">
@@ -102,8 +102,7 @@
         </div>
 
         <div class="export-section hidden" id="export-section">
-            <button class="btn btn-ghost btn-full btn-sm" id="btn-export">📥 Export CSV</button>
-            <button class="btn btn-ghost btn-full btn-sm" id="btn-export-images">🖼 Export Images</button>
+            <button class="btn btn-ghost btn-full btn-sm" id="btn-export-zip">📦 Export All (.zip)</button>
             <button class="btn btn-ghost btn-full btn-sm btn-danger" id="btn-clear">🗑 Clear All Contacts</button>
         </div>
 
@@ -141,10 +140,16 @@
             <p class="modal-hint">
                 <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get an API key →</a>
             </p>
+            <div class="form-group">
+                <label>Webhook URL (Optional)</label>
+                <input type="url" id="input-webhook" placeholder="https://hooks.zapier.com/...">
+                <p class="modal-hint">Automatically backup contacts to Zapier/Airtable/Make.</p>
+            </div>
             <button class="btn btn-primary btn-full" id="btn-save-key">Save</button>
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
