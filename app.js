@@ -1194,6 +1194,14 @@ function showResult(parsed, imageBlob) {
         if (!els.fCompanySelect.value) els.fCompanySelect.value = candidates[0].inst;
         
         if (!els.fCompany.value) els.fCompany.value = els.fCompanySelect.value;
+        
+        // Manually trigger email guess (setting .value doesn't fire change event)
+        const emailGuess = _guessEmail(els.fCompanySelect.value, els.fName.value);
+        if (emailGuess && !els.fEmail.value) {
+            els.fEmail.value = emailGuess;
+            els.emailConf.textContent = 'Auto-generated from database based on selected company.';
+            els.emailConf.className = 'email-confidence uncertain';
+        }
     } else {
         els.fCompanySelect.style.display = 'none';
         els.fCompany.style.display = 'block';
@@ -1419,6 +1427,22 @@ async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
     }
 
     // ── Update the contact in place ────────────────
+    const finalCompany = verified?.company || contact.company;
+    let finalEmail = verified?.email || contact.email || '';
+    
+    // If we still don't have an email, generate one from the company we do have
+    if (!finalEmail && finalCompany) {
+        const guessed = _guessEmail(finalCompany, contact.name);
+        if (guessed) {
+            finalEmail = guessed;
+            notesParts.push(`Email fallback generated from local DB: ${guessed}`);
+        }
+    }
+
+    if (!finalEmail) {
+        notesParts.push('[No email could be determined — no AI result, no form value, no local DB match]');
+    }
+
     const v2Contact = {
         id: contactId,
         name: contact.name,
@@ -1430,8 +1454,8 @@ async function _verifyInBackground(contactId, contact, imageBlob, wasEdited) {
         credentials: contact.credentials,
         specialty: contact.specialty,
         captured_at: contact.captured_at,
-        company: verified?.company || contact.company,
-        email: verified?.email || contact.email,
+        company: finalCompany,
+        email: finalEmail,
         notes: notesParts.join('\n\n'),
         version: 2,
         edited: wasEdited,
@@ -1544,6 +1568,29 @@ els.btnSaveKey.addEventListener('click', () => {
     toast('Settings saved');
 });
 
+// ── Company email guess helper ──────────────────
+function _guessEmail(companyName, personName) {
+    if (typeof LOCAL_DB === 'undefined') return '';
+    const match = LOCAL_DB.find(db => db.inst === companyName);
+    if (!match || !match.domain) return '';
+    const names = (personName || '').trim().split(' ');
+    if (names.length < 2) return '';
+    const f = names[0].toLowerCase();
+    const l = names[names.length - 1].toLowerCase();
+    const fi = f.charAt(0);
+    const fmts = {
+        firstlast: `${f}${l}@${match.domain}`,
+        'first.last': `${f}.${l}@${match.domain}`,
+        'last.first': `${l}.${f}@${match.domain}`,
+        flast: `${fi}${l}@${match.domain}`,
+        'f.last': `${fi}.${l}@${match.domain}`,
+        lastf: `${l}${fi}@${match.domain}`,
+        firstl: `${f}${l.charAt(0)}@${match.domain}`,
+        'first.l': `${f}.${l.charAt(0)}@${match.domain}`,
+    };
+    return fmts[match.fmt] || '';
+}
+
 // ── Company Select Change Listener ──────────────
 els.fCompanySelect.addEventListener('change', (e) => {
     if (e.target.value === 'Other') {
@@ -1553,32 +1600,11 @@ els.fCompanySelect.addEventListener('change', (e) => {
         els.fCompany.focus();
     } else {
         els.fCompany.value = e.target.value;
-        // Update email guess
-        if (typeof LOCAL_DB !== 'undefined') {
-            const match = LOCAL_DB.find(db => db.inst === e.target.value);
-            if (match) {
-                let emailGuess = '';
-                const names = (els.fName.value).split(' ');
-                if (names.length >= 2 && match.domain) {
-                    const f = names[0].toLowerCase();
-                    const l = names[names.length - 1].toLowerCase();
-                    const fi = f.charAt(0);
-                    
-                    if (match.fmt === 'firstlast') emailGuess = `${f}${l}@${match.domain}`;
-                    else if (match.fmt === 'first.last') emailGuess = `${f}.${l}@${match.domain}`;
-                    else if (match.fmt === 'last.first') emailGuess = `${l}.${f}@${match.domain}`;
-                    else if (match.fmt === 'flast') emailGuess = `${fi}${l}@${match.domain}`;
-                    else if (match.fmt === 'f.last') emailGuess = `${fi}.${l}@${match.domain}`;
-                    else if (match.fmt === 'lastf') emailGuess = `${l}${fi}@${match.domain}`;
-                    else if (match.fmt === 'firstl') emailGuess = `${f}${l.charAt(0)}@${match.domain}`;
-                    else if (match.fmt === 'first.l') emailGuess = `${f}.${l.charAt(0)}@${match.domain}`;
-                }
-                if (emailGuess) {
-                    els.fEmail.value = emailGuess;
-                    els.emailConf.textContent = 'Auto-generated from database based on selected company.';
-                    els.emailConf.className = 'email-confidence uncertain';
-                }
-            }
+        const emailGuess = _guessEmail(e.target.value, els.fName.value);
+        if (emailGuess) {
+            els.fEmail.value = emailGuess;
+            els.emailConf.textContent = 'Auto-generated from database based on selected company.';
+            els.emailConf.className = 'email-confidence uncertain';
         }
     }
 });
