@@ -1271,6 +1271,7 @@ function showResult(parsed, imageBlob) {
 
 // ── Process image ─────────────────────────────────
 async function processImage(imageBlob) {
+    stopCamera();  // release hardware immediately; OCR takes seconds, let it settle
     showScreen('processing');
 
     // Reset step states
@@ -1335,6 +1336,7 @@ async function processImage(imageBlob) {
         console.error('Processing error:', err);
         toast(err.message || 'Something went wrong. Please try again.', true);
         showScreen('camera');
+        startCamera();
     }
 }
 
@@ -1663,6 +1665,13 @@ async function init() {
 
     // Start background queue processing
     setTimeout(processEnrichmentQueue, 5000);
+
+    // Handle iOS/mobile camera suspension when app backgrounds
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && screens.camera.classList.contains('active')) {
+            startCamera();
+        }
+    });
 
     // Start camera
     startCamera();
