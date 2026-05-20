@@ -46,6 +46,7 @@ const els = {
     emailConf: $('#email-confidence'),
     contactForm: $('#contact-form'),
     webhookInput: $('#input-webhook'),
+    plainOcrCheckbox: $('#input-plain-ocr'),
 };
 
 let stream = null;
@@ -484,6 +485,15 @@ function setWebhook(url) {
     localStorage.setItem('badgescan_webhook', url.trim());
 }
 
+// ── Plain OCR Mode ────────────────────────
+function getPlainOcr() {
+    return localStorage.getItem('badgescan_plain_ocr') === 'true';
+}
+
+function setPlainOcr(val) {
+    localStorage.setItem('badgescan_plain_ocr', val ? 'true' : 'false');
+}
+
 // ── Counter (sync, uses in-memory cache) ───────────
 function updateCounter() {
     const count = getContacts().length;
@@ -808,7 +818,31 @@ function getResponseText(data) {
 async function parseBadgeImage(imageBlob) {
     const base64 = await blobToBase64(imageBlob);
 
-    const instructions = `You are a badge scanner for a conference contact capture app.
+    const plainMode = getPlainOcr();
+
+    const instructions = plainMode
+        ? `You are a badge scanner. Just read the text from this badge image and extract as much information as possible.
+Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object.
+
+ONLY extract what you can literally read from the image. Do not guess, infer, or fill in anything that is not visible.
+
+Fields to extract:
+{
+  "salutation": "Dr./Prof./Mr./Ms. or null",
+  "name": "Full name as printed on the badge",
+  "credentials": "PA-C, MD, DO, NP, RN, etc. or null",
+  "title": "Job title/role if printed (e.g. 'Director', 'Dean') or null",
+  "specialty": "Medical specialty if printed (e.g. 'Hematology and Oncology') or null",
+  "company": "Company/employer if printed on the badge, otherwise null",
+  "city": "City from the badge or null",
+  "state": "State abbreviation from the badge or null",
+  "phone": "Phone number if visible or null",
+  "email": "Email if explicitly printed on the badge, otherwise null",
+  "raw_text": "Every piece of text you can read on the badge (exclude QR codes)"
+}
+
+CRITICAL: Do NOT guess any field. If you cannot read it, set it to null.`
+        : `You are a badge scanner for a conference contact capture app.
 Analyze this image of an AAPA conference badge.
 Return ONLY valid JSON — no markdown, no code fences, just the raw JSON object.
 
@@ -1160,6 +1194,8 @@ async function processEnrichmentQueue() {
 
 // ── Show result screen ────────────────────────────
 function showResult(parsed, imageBlob) {
+    const plainMode = getPlainOcr();
+
     // Hide camera, show thumbnail
     els.cameraWrap.style.display = 'none';
     els.previewWrap.style.display = 'block';
@@ -1173,64 +1209,75 @@ function showResult(parsed, imageBlob) {
     if (!els.fCity.value) els.fCity.value = parsed.city || '';
     if (!els.fState.value) els.fState.value = parsed.state || '';
     if (!els.fTitle.value) els.fTitle.value = parsed.title || '';
-    
-    // Company dropdown logic
-    const candidates = localDbLookup(parsed);
-    if (candidates.length > 0) {
-        els.fCompany.style.display = 'none';
-        els.fCompanySelect.style.display = 'block';
-        els.fCompanySelect.innerHTML = '';
-        candidates.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c.inst;
-            opt.textContent = c.inst;
-            els.fCompanySelect.appendChild(opt);
-        });
-        const otherOpt = document.createElement('option');
-        otherOpt.value = 'Other';
-        otherOpt.textContent = 'Other (Type manually)';
-        els.fCompanySelect.appendChild(otherOpt);
-        
-        let bestMatch = null;
-        if (parsed.company) {
-            const lowerCompany = parsed.company.toLowerCase();
-            bestMatch = candidates.find(c => lowerCompany.includes(c.inst.toLowerCase()) || c.inst.toLowerCase().includes(lowerCompany));
-        }
-        
-        els.fCompanySelect.value = bestMatch ? bestMatch.inst : candidates[0].inst;
-        if (!els.fCompanySelect.value) els.fCompanySelect.value = candidates[0].inst;
-        
-        if (!els.fCompany.value) els.fCompany.value = els.fCompanySelect.value;
-        
-        // Manually trigger email guess (setting .value doesn't fire change event)
-        const emailGuess = _guessEmail(els.fCompanySelect.value, els.fName.value);
-        if (emailGuess && !els.fEmail.value) {
-            els.fEmail.value = emailGuess;
-            els.emailConf.textContent = 'Auto-generated from database based on selected company.';
-            els.emailConf.className = 'email-confidence uncertain';
-        }
-    } else {
+
+    if (plainMode) {
+        // Plain OCR mode: no local DB, no email guessing, just raw OCR
         els.fCompanySelect.style.display = 'none';
         els.fCompany.style.display = 'block';
         if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
-    }
-
-    // Validate OCR email — reject AI template/placeholder values
-    let ocrEmail = parsed.email || '';
-    if (ocrEmail) {
-        const localPart = ocrEmail.split('@')[0] || '';
-        const domain = ocrEmail.split('@')[1] || '';
-        // Catch placeholder local-parts: person, unknown, etc.
-        const localFake = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody|actual_email_guess|jsmith)\b/i.test(localPart);
-        // Catch template domains: hospital.edu, company.com, employer.edu
-        const domainFake = /\b(hospital|employer|company|domain|example)\b/i.test(domain);
-        if (localFake || domainFake) {
-            console.warn('OCR returned placeholder email, discarding:', ocrEmail);
-            ocrEmail = '';
+        if (!els.fEmail.value) els.fEmail.value = parsed.email || '';
+        if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
+        els.emailConf.textContent = '';
+    } else {
+        // Normal mode: local DB lookup + email guessing
+        // Company dropdown logic
+        const candidates = localDbLookup(parsed);
+        if (candidates.length > 0) {
+            els.fCompany.style.display = 'none';
+            els.fCompanySelect.style.display = 'block';
+            els.fCompanySelect.innerHTML = '';
+            candidates.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.inst;
+                opt.textContent = c.inst;
+                els.fCompanySelect.appendChild(opt);
+            });
+            const otherOpt = document.createElement('option');
+            otherOpt.value = 'Other';
+            otherOpt.textContent = 'Other (Type manually)';
+            els.fCompanySelect.appendChild(otherOpt);
+            
+            let bestMatch = null;
+            if (parsed.company) {
+                const lowerCompany = parsed.company.toLowerCase();
+                bestMatch = candidates.find(c => lowerCompany.includes(c.inst.toLowerCase()) || c.inst.toLowerCase().includes(lowerCompany));
+            }
+            
+            els.fCompanySelect.value = bestMatch ? bestMatch.inst : candidates[0].inst;
+            if (!els.fCompanySelect.value) els.fCompanySelect.value = candidates[0].inst;
+            
+            if (!els.fCompany.value) els.fCompany.value = els.fCompanySelect.value;
+            
+            // Manually trigger email guess (setting .value doesn't fire change event)
+            const emailGuess = _guessEmail(els.fCompanySelect.value, els.fName.value);
+            if (emailGuess && !els.fEmail.value) {
+                els.fEmail.value = emailGuess;
+                els.emailConf.textContent = 'Auto-generated from database based on selected company.';
+                els.emailConf.className = 'email-confidence uncertain';
+            }
+        } else {
+            els.fCompanySelect.style.display = 'none';
+            els.fCompany.style.display = 'block';
+            if (!els.fCompany.value) els.fCompany.value = parsed.company || '';
         }
+
+        // Validate OCR email — reject AI template/placeholder values
+        let ocrEmail = parsed.email || '';
+        if (ocrEmail) {
+            const localPart = ocrEmail.split('@')[0] || '';
+            const domain = ocrEmail.split('@')[1] || '';
+            // Catch placeholder local-parts: person, unknown, etc.
+            const localFake = /\b(person|placeholder|unknown|first|last|name|example|test|user|nobody|actual_email_guess|jsmith)\b/i.test(localPart);
+            // Catch template domains: hospital.edu, company.com, employer.edu
+            const domainFake = /\b(hospital|employer|company|domain|example)\b/i.test(domain);
+            if (localFake || domainFake) {
+                console.warn('OCR returned placeholder email, discarding:', ocrEmail);
+                ocrEmail = '';
+            }
+        }
+        if (!els.fEmail.value) els.fEmail.value = ocrEmail;
+        if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
     }
-    if (!els.fEmail.value) els.fEmail.value = ocrEmail;
-    if (!els.fPhone.value) els.fPhone.value = parsed.phone || '';
 
     // Build notes from badge metadata
     if (!els.fNotes.value) {
@@ -1295,39 +1342,46 @@ async function processImage(imageBlob) {
         }
         
         // Phase 1: Local DB Lookup (Instant)
-        setStep(1, 'in_progress');
-        const candidates = localDbLookup(parsedData);
-        if (candidates.length > 0) {
-            const best = candidates[0];
-            if (!parsedData.company) parsedData.company = best.inst;
-            
-            // Generate best guess format
-            let emailGuess = '';
-            const names = (parsedData.name || els.fName.value).split(' ');
-            if (names.length >= 2 && best.domain) {
-                const f = names[0].toLowerCase();
-                const l = names[names.length - 1].toLowerCase();
-                const fi = f.charAt(0);
+        // Skip in plain OCR mode — no guessing
+        if (getPlainOcr()) {
+            setStep(1, 'done');
+            els.steps[1].textContent = '✅ Plain OCR — no guessing';
+            els.steps[1].classList.add('done');
+        } else {
+            setStep(1, 'in_progress');
+            const candidates = localDbLookup(parsedData);
+            if (candidates.length > 0) {
+                const best = candidates[0];
+                if (!parsedData.company) parsedData.company = best.inst;
                 
-                if (best.fmt === 'firstlast') emailGuess = `${f}${l}@${best.domain}`;
-                else if (best.fmt === 'first.last') emailGuess = `${f}.${l}@${best.domain}`;
-                else if (best.fmt === 'last.first') emailGuess = `${l}.${f}@${best.domain}`;
-                else if (best.fmt === 'flast') emailGuess = `${fi}${l}@${best.domain}`;
-                else if (best.fmt === 'f.last') emailGuess = `${fi}.${l}@${best.domain}`;
-                else if (best.fmt === 'lastf') emailGuess = `${l}${fi}@${best.domain}`;
-                else if (best.fmt === 'firstl') emailGuess = `${f}${l.charAt(0)}@${best.domain}`;
-                else if (best.fmt === 'first.l') emailGuess = `${f}.${l.charAt(0)}@${best.domain}`;
+                // Generate best guess format
+                let emailGuess = '';
+                const names = (parsedData.name || els.fName.value).split(' ');
+                if (names.length >= 2 && best.domain) {
+                    const f = names[0].toLowerCase();
+                    const l = names[names.length - 1].toLowerCase();
+                    const fi = f.charAt(0);
+                    
+                    if (best.fmt === 'firstlast') emailGuess = `${f}${l}@${best.domain}`;
+                    else if (best.fmt === 'first.last') emailGuess = `${f}.${l}@${best.domain}`;
+                    else if (best.fmt === 'last.first') emailGuess = `${l}.${f}@${best.domain}`;
+                    else if (best.fmt === 'flast') emailGuess = `${fi}${l}@${best.domain}`;
+                    else if (best.fmt === 'f.last') emailGuess = `${fi}.${l}@${best.domain}`;
+                    else if (best.fmt === 'lastf') emailGuess = `${l}${fi}@${best.domain}`;
+                    else if (best.fmt === 'firstl') emailGuess = `${f}${l.charAt(0)}@${best.domain}`;
+                    else if (best.fmt === 'first.l') emailGuess = `${f}.${l.charAt(0)}@${best.domain}`;
+                }
+                if (!parsedData.email) parsedData.email = emailGuess;
+                
+                if (candidates.length > 1) {
+                    const others = candidates.slice(1, 4).map(c => c.inst).join(', ');
+                    parsedData.db_guess = `Best guess - ${best.inst}. Also possible: ${others}`;
+                } else {
+                    parsedData.db_guess = `Matched from local DB: ${best.inst}`;
+                }
             }
-            if (!parsedData.email) parsedData.email = emailGuess;
-            
-            if (candidates.length > 1) {
-                const others = candidates.slice(1, 4).map(c => c.inst).join(', ');
-                parsedData.db_guess = `Best guess - ${best.inst}. Also possible: ${others}`;
-            } else {
-                parsedData.db_guess = `Matched from local DB: ${best.inst}`;
-            }
+            setStep(1, 'done');
         }
-        setStep(1, 'done');
 
         // Show result on the camera screen
         showResult(parsedData, imageBlob);
@@ -1558,7 +1612,9 @@ els.contactForm.addEventListener('submit', async (e) => {
     startCamera();
 
     // ── Background: verify via web search, update in place ──
-    _verifyInBackground(id, contact, savedImage, _formEdited);
+    if (!getPlainOcr()) {
+        _verifyInBackground(id, contact, savedImage, _formEdited);
+    }
 });
 
 // ── Event: Export Zip ──────────────────────────────
@@ -1576,6 +1632,7 @@ $('#btn-apikey').addEventListener('click', () => {
     els.apiKeyInput.value = getApiKey();
     els.confInput.value = getConference();
     if (els.webhookInput) els.webhookInput.value = getWebhook();
+    if (els.plainOcrCheckbox) els.plainOcrCheckbox.checked = getPlainOcr();
     els.apiKeyModal.classList.add('active');
 });
 
@@ -1587,10 +1644,12 @@ els.btnSaveKey.addEventListener('click', () => {
     const key = els.apiKeyInput.value.trim();
     const conf = els.confInput.value.trim();
     const webhook = els.webhookInput ? els.webhookInput.value.trim() : '';
+    const plainOcr = els.plainOcrCheckbox ? els.plainOcrCheckbox.checked : false;
     if (!key) return toast('Please enter an API key', true);
     setApiKey(key);
     setConference(conf);
     setWebhook(webhook);
+    setPlainOcr(plainOcr);
     els.apiKeyModal.classList.remove('active');
     toast('Settings saved');
 });

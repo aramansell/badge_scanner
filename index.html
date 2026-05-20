@@ -148,6 +148,13 @@
                 <input type="url" id="input-webhook" placeholder="https://hooks.zapier.com/...">
                 <p class="modal-hint">Automatically backup contacts to Zapier/Airtable/Make.</p>
             </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="input-plain-ocr" style="width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer;">
+                    Plain OCR Mode (no AI guessing)
+                </label>
+                <p class="modal-hint">Only reads text from the badge. Skips email lookup, company guessing, and background verification.</p>
+            </div>
             <button class="btn btn-primary btn-full" id="btn-save-key">Save</button>
         </div>
     </div>
